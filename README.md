@@ -33,6 +33,13 @@ cp .env.example .env.local
 npm run dev
 ```
 
+If you see `Cannot find module './331.js'` or similar webpack errors, clear the build cache and restart:
+
+```bash
+npm run clean
+npm run dev
+```
+
 - Web app: [http://localhost:3000](http://localhost:3000)
 - Signaling: [http://localhost:3001](http://localhost:3001)
 

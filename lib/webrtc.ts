@@ -1,11 +1,21 @@
 "use client";
 
+import {
+  configureChannelBufferThresholds,
+  getBufferedAmount,
+  waitForBufferDrain,
+} from "@/lib/channel-backpressure";
 import { getStunServers, RECONNECT_DELAY_MS } from "@/lib/constants";
-import { encodeControl, parseMessage } from "@/lib/protocol";
+import { tlog } from "@/lib/transfer-debug";
+import { parseMessage } from "@/lib/protocol";
 import type { ControlMessage, DeviceId, SignalPayload } from "@/types";
 
 export type DataChannelHandler = (peerId: DeviceId, data: ArrayBuffer | string) => void;
 export type ConnectionHandler = (peerId: DeviceId, connected: boolean) => void;
+export type ConnectionStateHandler = (
+  peerId: DeviceId,
+  state: RTCPeerConnectionState
+) => void;
 
 interface PeerConnectionState {
   pc: RTCPeerConnection;
@@ -22,17 +32,20 @@ export class WebRTCManager {
   private onSignal: (payload: SignalPayload) => void;
   private onData: DataChannelHandler;
   private onConnection: ConnectionHandler;
+  private onConnectionState: ConnectionStateHandler | null;
 
   constructor(
     localId: DeviceId,
     onSignal: (payload: SignalPayload) => void,
     onData: DataChannelHandler,
-    onConnection: ConnectionHandler
+    onConnection: ConnectionHandler,
+    onConnectionState?: ConnectionStateHandler
   ) {
     this.localId = localId;
     this.onSignal = onSignal;
     this.onData = onData;
     this.onConnection = onConnection;
+    this.onConnectionState = onConnectionState ?? null;
   }
 
   private createPeerConnection(peerId: DeviceId, polite: boolean): PeerConnectionState {
@@ -58,12 +71,21 @@ export class WebRTCManager {
     };
 
     pc.onconnectionstatechange = () => {
-      const connected =
-        pc.connectionState === "connected" && state.channel?.readyState === "open";
-      if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
+      const cs = pc.connectionState;
+      tlog("connection state", peerId, cs);
+      this.onConnectionState?.(peerId, cs);
+
+      const connected = cs === "connected" && state.channel?.readyState === "open";
+      if (cs === "failed" || cs === "disconnected") {
+        this.onConnection(peerId, false);
         this.scheduleReconnect(peerId);
+      } else if (cs === "connected") {
+        this.onConnection(peerId, connected);
       }
-      this.onConnection(peerId, connected);
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      tlog("ice connection state", peerId, pc.iceConnectionState);
     };
 
     pc.ondatachannel = (ev) => {
@@ -77,8 +99,27 @@ export class WebRTCManager {
 
   private wireChannel(peerId: DeviceId, channel: RTCDataChannel): void {
     channel.binaryType = "arraybuffer";
-    channel.onopen = () => this.onConnection(peerId, true);
-    channel.onclose = () => this.onConnection(peerId, false);
+    configureChannelBufferThresholds(channel);
+
+    channel.onopen = () => {
+      tlog("datachannel open", peerId);
+      this.onConnection(peerId, true);
+    };
+
+    channel.onclose = () => {
+      tlog("datachannel closed", peerId);
+      this.onConnection(peerId, false);
+    };
+
+    channel.onerror = (ev) => {
+      tlog("datachannel error", peerId, ev);
+      this.onConnection(peerId, false);
+    };
+
+    channel.onbufferedamountlow = () => {
+      tlog("bufferedamountlow event", peerId, channel.bufferedAmount);
+    };
+
     channel.onmessage = (ev) => {
       const data = ev.data as ArrayBuffer | string;
       this.onData(peerId, data);
@@ -149,8 +190,7 @@ export class WebRTCManager {
 
     if (type === "offer" && sdp) {
       const offerCollision =
-        state.makingOffer ||
-        state.pc.signalingState !== "stable";
+        state.makingOffer || state.pc.signalingState !== "stable";
       state.ignoreOffer = !polite && offerCollision;
       if (state.ignoreOffer) return;
 
@@ -175,24 +215,55 @@ export class WebRTCManager {
     }
   }
 
-  sendControl(peerId: DeviceId, msg: ControlMessage): boolean {
+  private getChannel(peerId: DeviceId): RTCDataChannel | null {
     const state = this.connections.get(peerId);
-    if (!state?.channel || state.channel.readyState !== "open") return false;
-    state.channel.send(encodeControl(msg));
-    return true;
+    if (!state?.channel || state.channel.readyState !== "open") return null;
+    return state.channel;
   }
 
-  sendRaw(peerId: DeviceId, data: ArrayBuffer): boolean {
-    const state = this.connections.get(peerId);
-    if (!state?.channel || state.channel.readyState !== "open") return false;
-    // Backpressure: caller retries when buffer is full
-    if (state.channel.bufferedAmount > 8 * 1024 * 1024) return false;
+  async sendControl(peerId: DeviceId, msg: ControlMessage): Promise<boolean> {
+    const channel = this.getChannel(peerId);
+    if (!channel) return false;
+    const { encodeControl } = await import("@/lib/protocol");
+    const drained = await waitForBufferDrain(channel);
+    if (!drained) return false;
     try {
-      state.channel.send(data);
+      channel.send(encodeControl(msg));
       return true;
     } catch {
       return false;
     }
+  }
+
+  async sendRaw(peerId: DeviceId, data: ArrayBuffer): Promise<boolean> {
+    const channel = this.getChannel(peerId);
+    if (!channel) return false;
+
+    const drained = await waitForBufferDrain(channel);
+    if (!drained) {
+      tlog("sendRaw blocked: buffer drain timeout", peerId, channel.bufferedAmount);
+      return false;
+    }
+
+    try {
+      channel.send(data);
+      tlog("chunk sent on wire", peerId, "bufferedAmount", channel.bufferedAmount);
+      return true;
+    } catch (err) {
+      tlog("sendRaw error", peerId, err);
+      return false;
+    }
+  }
+
+  getBufferedAmount(peerId: DeviceId): number {
+    const channel = this.getChannel(peerId);
+    return channel ? getBufferedAmount(channel) : 0;
+  }
+
+  /** @deprecated sync send — use sendRaw */
+  sendControlSync(peerId: DeviceId, msg: ControlMessage): boolean {
+    void this.sendControl(peerId, msg);
+    return true;
   }
 
   isConnected(peerId: DeviceId): boolean {
@@ -223,7 +294,10 @@ export class WebRTCManager {
     }, RECONNECT_DELAY_MS);
   }
 
-  handleIncomingData(peerId: DeviceId, raw: ArrayBuffer | string): ReturnType<typeof parseMessage> {
+  handleIncomingData(
+    peerId: DeviceId,
+    raw: ArrayBuffer | string
+  ): ReturnType<typeof parseMessage> {
     return parseMessage(raw);
   }
 

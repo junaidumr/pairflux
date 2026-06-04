@@ -1,25 +1,42 @@
 "use client";
 
-import { CHUNK_SIZE, MAX_PENDING_CHUNKS } from "@/lib/constants";
+import {
+  CHUNK_ACK_TIMEOUT_MS,
+  CHUNK_SIZE,
+  MAX_CHUNK_RETRIES,
+} from "@/lib/constants";
+import {
+  createReceiveSink,
+  downloadBlob,
+  type ReceiveSinkHandle,
+} from "@/lib/file-receiver";
 import { encodeChunk } from "@/lib/protocol";
+import { tlog } from "@/lib/transfer-debug";
 import type { ControlMessage, DeviceId, TransferItem, TransferStatus } from "@/types";
 
 type TransferUpdate = (item: TransferItem) => void;
+type SendRawFn = (peerId: DeviceId, data: ArrayBuffer) => Promise<boolean>;
+type SendControlFn = (peerId: DeviceId, msg: ControlMessage) => Promise<boolean>;
+type IsConnectedFn = (peerId: DeviceId) => boolean;
 
 interface OutgoingState {
   file: File;
   peerId: DeviceId;
   peerName: string;
   id: string;
-  chunkIndex: number;
-  ackedIndex: number;
-  pending: number;
+  lastAcked: number;
+  awaitingAck: boolean;
+  inflightIndex: number | null;
   bytesSent: number;
   startedAt: number;
   lastSpeedAt: number;
   lastSpeedBytes: number;
   aborted: boolean;
   status: TransferStatus;
+  retries: number;
+  ackTimer: ReturnType<typeof setTimeout> | null;
+  loopRunning: boolean;
+  error?: string;
 }
 
 interface IncomingState {
@@ -29,12 +46,12 @@ interface IncomingState {
   name: string;
   size: number;
   mime: string;
-  parts: BlobPart[];
   nextExpected: number;
   totalReceived: number;
   status: TransferStatus;
   startedAt: number;
   completing: boolean;
+  sink: ReceiveSinkHandle | null;
 }
 
 function chunkByteLength(fileSize: number, index: number): number {
@@ -48,38 +65,95 @@ function totalChunkCount(fileSize: number): number {
   return Math.ceil(fileSize / CHUNK_SIZE);
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 export class TransferEngine {
   private outgoing = new Map<string, OutgoingState>();
   private incoming = new Map<string, IncomingState>();
   private onUpdate: TransferUpdate;
-  private sendRaw: (peerId: DeviceId, data: ArrayBuffer) => boolean;
-  private sendControl: (peerId: DeviceId, msg: ControlMessage) => boolean;
+  private sendRaw: SendRawFn;
+  private sendControl: SendControlFn;
+  private isConnected: IsConnectedFn;
+  private getBufferedAmount: (peerId: DeviceId) => number;
 
   constructor(
     onUpdate: TransferUpdate,
-    sendRaw: (peerId: DeviceId, data: ArrayBuffer) => boolean,
-    sendControl: (peerId: DeviceId, msg: ControlMessage) => boolean
+    sendRaw: SendRawFn,
+    sendControl: SendControlFn,
+    isConnected: IsConnectedFn,
+    getBufferedAmount: (peerId: DeviceId) => number
   ) {
     this.onUpdate = onUpdate;
     this.sendRaw = sendRaw;
     this.sendControl = sendControl;
+    this.isConnected = isConnected;
+    this.getBufferedAmount = getBufferedAmount;
   }
 
-  private sendAck(peerId: DeviceId, transferId: string, index: number, attempt = 0): void {
+  onPeerConnectionState(peerId: DeviceId, state: RTCPeerConnectionState): void {
+    tlog("peer connection state for transfers", peerId, state);
+    if (state === "connected") {
+      for (const out of this.outgoing.values()) {
+        if (out.peerId !== peerId || out.status !== "transferring") continue;
+        if (out.aborted) continue;
+        void this.sendControl(peerId, {
+          type: "transfer-resume",
+          id: out.id,
+          fromChunk: out.lastAcked + 1,
+        });
+        void this.runSendLoop(out.id);
+      }
+      return;
+    }
+    if (state === "disconnected" || state === "failed" || state === "closed") {
+      for (const out of this.outgoing.values()) {
+        if (out.peerId !== peerId || out.status !== "transferring") continue;
+        this.clearAckTimer(out);
+        out.awaitingAck = false;
+        tlog("transfer paused due to connection", out.id);
+        this.emitOutgoing(out, "Connection interrupted — will resume when reconnected");
+      }
+    }
+  }
+
+  private clearAckTimer(out: OutgoingState): void {
+    if (out.ackTimer) {
+      clearTimeout(out.ackTimer);
+      out.ackTimer = null;
+    }
+  }
+
+  private async sendAck(peerId: DeviceId, transferId: string, index: number, attempt = 0): Promise<void> {
     const msg: ControlMessage = { type: "chunk-ack", id: transferId, index };
-    if (this.sendControl(peerId, msg)) return;
-    if (attempt < 20) {
-      setTimeout(() => this.sendAck(peerId, transferId, index, attempt + 1), 50);
+    const ok = await this.sendControl(peerId, msg);
+    if (ok) {
+      tlog("ack sent", transferId, index);
+      return;
+    }
+    if (attempt < 30) {
+      setTimeout(() => void this.sendAck(peerId, transferId, index, attempt + 1), 40);
     }
   }
 
   requestSend(file: File, peerId: DeviceId, peerName: string): string {
     const id = crypto.randomUUID();
-    const item: TransferItem = {
+    this.outgoing.set(id, {
+      file,
+      peerId,
+      peerName,
+      id,
+      lastAcked: -1,
+      awaitingAck: false,
+      inflightIndex: null,
+      bytesSent: 0,
+      startedAt: Date.now(),
+      lastSpeedAt: Date.now(),
+      lastSpeedBytes: 0,
+      aborted: false,
+      status: "awaiting-accept",
+      retries: 0,
+      ackTimer: null,
+      loopRunning: false,
+    });
+    this.onUpdate({
       id,
       peerId,
       peerName,
@@ -91,24 +165,8 @@ export class TransferEngine {
       progress: 0,
       speedBps: 0,
       etaSeconds: null,
-    };
-    this.outgoing.set(id, {
-      file,
-      peerId,
-      peerName,
-      id,
-      chunkIndex: 0,
-      ackedIndex: -1,
-      pending: 0,
-      bytesSent: 0,
-      startedAt: Date.now(),
-      lastSpeedAt: Date.now(),
-      lastSpeedBytes: 0,
-      aborted: false,
-      status: "awaiting-accept",
     });
-    this.onUpdate(item);
-    this.sendControl(peerId, {
+    void this.sendControl(peerId, {
       type: "transfer-request",
       id,
       name: file.name,
@@ -120,7 +178,7 @@ export class TransferEngine {
 
   async handleControl(peerId: DeviceId, peerName: string, msg: ControlMessage): Promise<void> {
     switch (msg.type) {
-      case "transfer-request":
+      case "transfer-request": {
         this.incoming.set(msg.id, {
           id: msg.id,
           peerId,
@@ -128,12 +186,12 @@ export class TransferEngine {
           name: msg.name,
           size: msg.size,
           mime: msg.mime,
-          parts: [],
           nextExpected: 0,
           totalReceived: 0,
           status: "awaiting-accept",
           startedAt: Date.now(),
           completing: false,
+          sink: null,
         });
         this.onUpdate({
           id: msg.id,
@@ -149,6 +207,7 @@ export class TransferEngine {
           etaSeconds: null,
         });
         break;
+      }
       case "transfer-accept":
         await this.startOutgoing(msg.id);
         break;
@@ -167,25 +226,26 @@ export class TransferEngine {
       case "transfer-complete":
         this.finishOutgoing(msg.id, "completed");
         break;
-      case "text":
-      case "link":
+      default:
         break;
     }
   }
 
-  acceptIncoming(id: string): void {
+  async acceptIncoming(id: string): Promise<void> {
     const inc = this.incoming.get(id);
     if (!inc) return;
+    inc.sink = await createReceiveSink(inc.name, inc.size);
     inc.status = "transferring";
     inc.startedAt = Date.now();
-    this.sendControl(inc.peerId, { type: "transfer-accept", id });
+    void this.sendControl(inc.peerId, { type: "transfer-accept", id });
     this.emitIncoming(inc);
   }
 
   rejectIncoming(id: string): void {
     const inc = this.incoming.get(id);
     if (!inc) return;
-    this.sendControl(inc.peerId, { type: "transfer-reject", id });
+    void this.sendControl(inc.peerId, { type: "transfer-reject", id });
+    if (inc.sink) void inc.sink.sink.abort();
     inc.status = "rejected";
     this.emitIncoming(inc);
     this.incoming.delete(id);
@@ -196,11 +256,13 @@ export class TransferEngine {
     const inc = this.incoming.get(id);
     if (out) {
       out.aborted = true;
-      this.sendControl(out.peerId, { type: "transfer-cancel", id });
+      this.clearAckTimer(out);
+      void this.sendControl(out.peerId, { type: "transfer-cancel", id });
       this.finishOutgoing(id, "cancelled");
     }
     if (inc) {
-      this.sendControl(inc.peerId, { type: "transfer-cancel", id });
+      void this.sendControl(inc.peerId, { type: "transfer-cancel", id });
+      if (inc.sink) void inc.sink.sink.abort();
       inc.status = "cancelled";
       this.emitIncoming(inc);
       this.incoming.delete(id);
@@ -212,9 +274,9 @@ export class TransferEngine {
     if (!out || out.status !== "failed") return;
     out.aborted = false;
     out.status = "awaiting-accept";
-    out.chunkIndex = out.ackedIndex + 1;
-    out.pending = 0;
-    this.sendControl(out.peerId, {
+    out.awaitingAck = false;
+    out.retries = 0;
+    void this.sendControl(out.peerId, {
       type: "transfer-request",
       id: out.id,
       name: out.file.name,
@@ -231,79 +293,143 @@ export class TransferEngine {
     out.startedAt = Date.now();
     out.lastSpeedAt = Date.now();
     out.lastSpeedBytes = 0;
+    out.retries = 0;
     this.emitOutgoing(out);
-    await this.pumpChunks(id);
+    await this.runSendLoop(id);
   }
 
   private async resumeOutgoing(id: string, fromChunk: number): Promise<void> {
     const out = this.outgoing.get(id);
-    if (!out) return;
-    out.chunkIndex = fromChunk;
-    out.ackedIndex = fromChunk - 1;
+    if (!out || out.aborted) return;
     out.status = "transferring";
-    await this.pumpChunks(id);
+    out.lastAcked = fromChunk - 1;
+    out.awaitingAck = false;
+    out.inflightIndex = null;
+    out.retries = 0;
+    this.clearAckTimer(out);
+    tlog("resume transfer", id, "from chunk", fromChunk);
+    await this.runSendLoop(id);
   }
 
-  private async sendChunkWithBackoff(
-    peerId: DeviceId,
-    packet: ArrayBuffer,
-    out: OutgoingState
-  ): Promise<boolean> {
-    for (let attempt = 0; attempt < 200; attempt++) {
-      if (out.aborted) return false;
-      if (this.sendRaw(peerId, packet)) return true;
-      await sleep(25);
-    }
-    return false;
-  }
-
-  private async pumpChunks(id: string): Promise<void> {
+  private async runSendLoop(id: string): Promise<void> {
     const out = this.outgoing.get(id);
-    if (!out || out.aborted || out.status !== "transferring") return;
+    if (!out || out.loopRunning) return;
+    out.loopRunning = true;
 
-    const totalChunks = totalChunkCount(out.file.size);
+    try {
+      while (
+        out.status === "transferring" &&
+        !out.aborted &&
+        this.isConnected(out.peerId)
+      ) {
+        const total = totalChunkCount(out.file.size);
+        if (out.lastAcked >= total - 1 && !out.awaitingAck) {
+          await this.completeOutgoing(out);
+          break;
+        }
 
-    while (
-      out.pending < MAX_PENDING_CHUNKS &&
-      out.chunkIndex < totalChunks &&
-      !out.aborted
-    ) {
-      const index = out.chunkIndex;
-      const start = index * CHUNK_SIZE;
-      const end = Math.min(start + CHUNK_SIZE, out.file.size);
-      const buffer = await out.file.slice(start, end).arrayBuffer();
-      const packet = encodeChunk(id, index, buffer);
+        if (out.awaitingAck) {
+          break;
+        }
 
-      const sent = await this.sendChunkWithBackoff(out.peerId, packet, out);
-      if (!sent) {
-        out.status = "failed";
-        this.emitOutgoing(out);
-        return;
+        const index = out.lastAcked + 1;
+        if (index >= total) break;
+
+        await this.sendChunk(out, index);
+        break;
       }
+    } finally {
+      out.loopRunning = false;
+    }
+  }
 
-      out.pending++;
-      out.chunkIndex++;
+  private async sendChunk(out: OutgoingState, index: number): Promise<void> {
+    const id = out.id;
+    const start = index * CHUNK_SIZE;
+    const end = Math.min(start + CHUNK_SIZE, out.file.size);
+    const buffer = await out.file.slice(start, end).arrayBuffer();
+    const packet = encodeChunk(id, index, buffer);
+
+    const buffered = this.getBufferedAmount(out.peerId);
+    tlog("chunk send attempt", id, index, "bufferedAmount", buffered);
+
+    const sent = await this.sendRaw(out.peerId, packet);
+    if (!sent) {
+      out.status = "failed";
+      out.error = "Data channel buffer full or closed";
+      this.emitOutgoing(out, out.error);
+      return;
     }
 
-    this.checkOutgoingComplete(out);
+    tlog("chunk sent", id, index);
+    out.awaitingAck = true;
+    out.inflightIndex = index;
+    this.updateOutgoingProgress(out);
+
+    this.clearAckTimer(out);
+    out.ackTimer = setTimeout(() => {
+      void this.onAckTimeout(id, index);
+    }, CHUNK_ACK_TIMEOUT_MS);
+  }
+
+  private async onAckTimeout(id: string, index: number): Promise<void> {
+    const out = this.outgoing.get(id);
+    if (!out || !out.awaitingAck || out.inflightIndex !== index) return;
+
+    tlog("ack timeout", id, index, "retries", out.retries);
+
+    if (out.retries >= MAX_CHUNK_RETRIES) {
+      out.status = "failed";
+      out.error = `No ACK for chunk ${index}`;
+      out.awaitingAck = false;
+      this.emitOutgoing(out, out.error);
+      return;
+    }
+
+    out.retries++;
+    out.awaitingAck = false;
+    out.inflightIndex = null;
+    await this.runSendLoop(id);
   }
 
   private handleAck(id: string, index: number): void {
     const out = this.outgoing.get(id);
     if (!out || out.status !== "transferring") return;
-    if (index < 0 || index <= out.ackedIndex) return;
 
-    const totalChunks = totalChunkCount(out.file.size);
-    const targetIndex = Math.min(index, totalChunks - 1);
+    tlog("ack received", id, index, "expected", out.lastAcked + 1);
 
-    for (let i = out.ackedIndex + 1; i <= targetIndex; i++) {
-      out.bytesSent += chunkByteLength(out.file.size, i);
+    if (index < 0) return;
+    if (index <= out.lastAcked) return;
+
+    const expected = out.lastAcked + 1;
+    if (index !== expected) {
+      tlog("ack out of order ignored", id, index, "expected", expected);
+      return;
     }
 
-    const ackedDelta = targetIndex - out.ackedIndex;
-    out.pending = Math.max(0, out.pending - ackedDelta);
-    out.ackedIndex = targetIndex;
+    if (!out.awaitingAck || out.inflightIndex !== index) {
+      return;
+    }
 
+    this.clearAckTimer(out);
+    out.lastAcked = index;
+    out.bytesSent += chunkByteLength(out.file.size, index);
+    out.awaitingAck = false;
+    out.inflightIndex = null;
+    out.retries = 0;
+
+    this.updateOutgoingProgress(out);
+
+    const total = totalChunkCount(out.file.size);
+    if (index >= total - 1) {
+      void this.completeOutgoing(out);
+      return;
+    }
+
+    void this.runSendLoop(id);
+  }
+
+  private updateOutgoingProgress(out: OutgoingState): void {
     const now = Date.now();
     const dt = Math.max((now - out.lastSpeedAt) / 1000, 0.001);
     const delta = out.bytesSent - out.lastSpeedBytes;
@@ -328,53 +454,45 @@ export class TransferEngine {
           : 100,
       speedBps: speed,
       etaSeconds: eta,
+      error: out.error,
     });
-
-    void this.pumpChunks(id);
-    this.checkOutgoingComplete(out);
   }
 
-  private checkOutgoingComplete(out: OutgoingState): void {
-    const totalChunks = totalChunkCount(out.file.size);
-    const allSent = out.chunkIndex >= totalChunks;
-    const allAcked = out.ackedIndex >= totalChunks - 1;
-
-    if (
-      allSent &&
-      allAcked &&
-      out.pending === 0 &&
-      out.status === "transferring" &&
-      !out.aborted
-    ) {
-      this.sendControl(out.peerId, { type: "transfer-complete", id: out.id });
-      this.finishOutgoing(out.id, "completed");
-    }
+  private async completeOutgoing(out: OutgoingState): Promise<void> {
+    if (out.status === "completed") return;
+    tlog("transfer complete (sender)", out.id);
+    await this.sendControl(out.peerId, { type: "transfer-complete", id: out.id });
+    this.finishOutgoing(out.id, "completed");
   }
 
-  handleChunk(
+  async handleChunk(
     peerId: DeviceId,
     peerName: string,
     transferId: string,
     index: number,
     data: ArrayBuffer
-  ): void {
+  ): Promise<void> {
     const inc = this.incoming.get(transferId);
     if (!inc || inc.status !== "transferring" || inc.completing) return;
 
-    const totalChunks = totalChunkCount(inc.size);
+    const total = totalChunkCount(inc.size);
 
     if (index < inc.nextExpected) {
-      this.sendAck(peerId, transferId, index);
+      void this.sendAck(peerId, transferId, index);
       return;
     }
 
     if (index > inc.nextExpected) {
+      tlog("chunk out of order buffered", transferId, index, "expected", inc.nextExpected);
       return;
     }
 
-    inc.parts.push(data);
+    tlog("chunk received", transferId, index, data.byteLength);
+
+    if (!inc.sink) return;
+    await inc.sink.sink.write(data);
     inc.totalReceived += data.byteLength;
-    this.sendAck(peerId, transferId, index);
+    void this.sendAck(peerId, transferId, index);
     inc.nextExpected++;
 
     const progress =
@@ -398,8 +516,8 @@ export class TransferEngine {
       etaSeconds: eta,
     });
 
-    if (inc.nextExpected >= totalChunks || inc.totalReceived >= inc.size) {
-      void this.completeIncoming(inc);
+    if (inc.nextExpected >= total || inc.totalReceived >= inc.size) {
+      await this.completeIncoming(inc);
     }
   }
 
@@ -407,22 +525,25 @@ export class TransferEngine {
     if (inc.completing) return;
     inc.completing = true;
 
-    const totalChunks = totalChunkCount(inc.size);
-    if (inc.parts.length < totalChunks) {
+    const total = totalChunkCount(inc.size);
+    if (inc.nextExpected < total) {
       inc.completing = false;
+      tlog("complete deferred, missing chunks", inc.id, inc.nextExpected, total);
       return;
     }
 
     try {
-      const blob = new Blob(inc.parts, { type: inc.mime });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = inc.name;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      if (!inc.sink) {
+        inc.completing = false;
+        return;
+      }
+      if (inc.sink.mode === "disk") {
+        await inc.sink.sink.finalize();
+      } else {
+        const parts = inc.sink.sink.getParts();
+        const blob = new Blob(parts, { type: inc.mime });
+        downloadBlob(blob, inc.name);
+      }
 
       inc.status = "completed";
       this.onUpdate({
@@ -438,7 +559,12 @@ export class TransferEngine {
         speedBps: 0,
         etaSeconds: 0,
       });
-      this.sendControl(inc.peerId, { type: "transfer-complete", id: inc.id });
+      await this.sendControl(inc.peerId, { type: "transfer-complete", id: inc.id });
+      tlog("transfer complete (receiver)", inc.id);
+    } catch (err) {
+      tlog("complete incoming failed", inc.id, err);
+      inc.status = "failed";
+      this.emitIncoming(inc);
     } finally {
       this.incoming.delete(inc.id);
     }
@@ -447,7 +573,9 @@ export class TransferEngine {
   private finishOutgoing(id: string, status: TransferStatus): void {
     const out = this.outgoing.get(id);
     if (!out) return;
+    this.clearAckTimer(out);
     out.status = status;
+    out.awaitingAck = false;
     this.onUpdate({
       id: out.id,
       peerId: out.peerId,
@@ -460,13 +588,15 @@ export class TransferEngine {
       progress: status === "completed" ? 100 : Math.min(100, (out.bytesSent / out.file.size) * 100),
       speedBps: 0,
       etaSeconds: status === "completed" ? 0 : null,
+      error: out.error,
     });
     if (status === "completed" || status === "cancelled" || status === "rejected") {
       this.outgoing.delete(id);
     }
   }
 
-  private emitOutgoing(out: OutgoingState): void {
+  private emitOutgoing(out: OutgoingState, error?: string): void {
+    if (error) out.error = error;
     this.onUpdate({
       id: out.id,
       peerId: out.peerId,
@@ -482,6 +612,7 @@ export class TransferEngine {
           : 0,
       speedBps: 0,
       etaSeconds: null,
+      error: out.error,
     });
   }
 
@@ -499,9 +630,5 @@ export class TransferEngine {
       speedBps: 0,
       etaSeconds: null,
     });
-  }
-
-  getPendingIncoming(): IncomingState[] {
-    return [...this.incoming.values()].filter((i) => i.status === "awaiting-accept");
   }
 }

@@ -81,7 +81,7 @@ export function usePeerBeam() {
             });
           }
         } else if (parsed.kind === "chunk") {
-          transferRef.current?.handleChunk(
+          void transferRef.current?.handleChunk(
             peerId,
             peerName,
             parsed.transferId,
@@ -97,6 +97,9 @@ export function usePeerBeam() {
           else next.delete(peerId);
           return next;
         });
+      },
+      (peerId, state) => {
+        transferRef.current?.onPeerConnectionState(peerId, state);
       }
     );
     webrtcRef.current = webrtc;
@@ -104,7 +107,9 @@ export function usePeerBeam() {
     transferRef.current = new TransferEngine(
       updateTransfer,
       (peerId, data) => webrtc.sendRaw(peerId, data),
-      (peerId, msg) => webrtc.sendControl(peerId, msg)
+      (peerId, msg) => webrtc.sendControl(peerId, msg),
+      (peerId) => webrtc.isConnected(peerId),
+      (peerId) => webrtc.getBufferedAmount(peerId)
     );
 
     const avatar = getAvatarColor(deviceId);
@@ -237,7 +242,7 @@ export function usePeerBeam() {
     sendText,
     sendLink,
     rename,
-    acceptTransfer: (id: string) => transferRef.current?.acceptIncoming(id),
+    acceptTransfer: (id: string) => void transferRef.current?.acceptIncoming(id),
     rejectTransfer: (id: string) => transferRef.current?.rejectIncoming(id),
     cancelTransfer: (id: string) => transferRef.current?.cancelTransfer(id),
     retryTransfer: (id: string) => transferRef.current?.retryOutgoing(id),

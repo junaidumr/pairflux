@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "clean": "rm -rf .next",
     "dev": "concurrently -n web,signal -c blue,magenta \"npm run dev:web\" \"npm run dev:signal\"",
     "dev:web": "next dev",
     "dev:signal": "tsx watch server/index.ts",
