@@ -5,10 +5,14 @@ import {
   getBufferedAmount,
   waitForBufferDrain,
 } from "@/lib/channel-backpressure";
-import { getStunServers, RECONNECT_DELAY_MS } from "@/lib/constants";
+import {
+  CHAT_BUFFER_DRAIN_TIMEOUT_MS,
+  getStunServers,
+  RECONNECT_DELAY_MS,
+} from "@/lib/constants";
 import { tlog } from "@/lib/transfer-debug";
-import { parseMessage } from "@/lib/protocol";
-import type { ControlMessage, DeviceId, SignalPayload } from "@/types";
+import { encodeControl, encodeWireChat, parseMessage } from "@/lib/protocol";
+import type { ControlMessage, DeviceId, SignalPayload, WireChatMessage } from "@/types";
 
 export type DataChannelHandler = (peerId: DeviceId, data: ArrayBuffer | string) => void;
 export type ConnectionHandler = (peerId: DeviceId, connected: boolean) => void;
@@ -121,9 +125,13 @@ export class WebRTCManager {
     };
 
     channel.onmessage = (ev) => {
-      const data = ev.data as ArrayBuffer | string;
-      this.onData(peerId, data);
+      this.dispatchChannelMessage(peerId, ev.data as ArrayBuffer | string);
     };
+  }
+
+  /** Routes inbound data by protocol kind (chat vs transfer control vs file chunk). */
+  private dispatchChannelMessage(peerId: DeviceId, raw: ArrayBuffer | string): void {
+    this.onData(peerId, raw);
   }
 
   async connectToPeer(peerId: DeviceId, polite = false): Promise<void> {
@@ -223,14 +231,34 @@ export class WebRTCManager {
 
   async sendControl(peerId: DeviceId, msg: ControlMessage): Promise<boolean> {
     const channel = this.getChannel(peerId);
-    if (!channel) return false;
-    const { encodeControl } = await import("@/lib/protocol");
+    if (!channel || channel.readyState !== "open") return false;
     const drained = await waitForBufferDrain(channel);
     if (!drained) return false;
     try {
       channel.send(encodeControl(msg));
       return true;
     } catch {
+      return false;
+    }
+  }
+
+  /** Text/link chat — short buffer wait so messages are not stuck behind file sends. */
+  async sendChat(peerId: DeviceId, msg: WireChatMessage): Promise<boolean> {
+    const channel = this.getChannel(peerId);
+    if (!channel || channel.readyState !== "open") {
+      tlog("sendChat skipped: channel not open", peerId, channel?.readyState);
+      return false;
+    }
+    const drained = await waitForBufferDrain(channel, CHAT_BUFFER_DRAIN_TIMEOUT_MS);
+    if (!drained) {
+      tlog("sendChat blocked: buffer drain timeout", peerId, channel.bufferedAmount);
+      return false;
+    }
+    try {
+      channel.send(encodeWireChat(msg));
+      return true;
+    } catch (err) {
+      tlog("sendChat error", peerId, err);
       return false;
     }
   }

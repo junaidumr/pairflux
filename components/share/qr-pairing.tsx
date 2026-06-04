@@ -1,7 +1,8 @@
 "use client";
 
-import { QrCode, ScanLine, X } from "lucide-react";
+import { Copy, QrCode, ScanLine, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -11,6 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { subtleText } from "@/lib/ui-classes";
 import type { PairingPayload } from "@/types";
 
 interface QrPairingProps {
@@ -25,13 +27,26 @@ export function QrPairing({ roomId, deviceId, onPair }: QrPairingProps) {
   const scannerRef = useRef<{ stop: () => Promise<void>; isScanning: boolean } | null>(null);
   const scanRegionId = "peer-beam-qr-scanner";
 
+  const pairingUrl =
+    typeof window !== "undefined"
+      ? `${window.location.origin}/share?room=${encodeURIComponent(roomId)}&pair=${deviceId}`
+      : "";
+
   useEffect(() => {
-    if (!deviceId) return;
-    const pairingUrl = `${window.location.origin}/share?room=${encodeURIComponent(roomId)}&pair=${deviceId}`;
+    if (!deviceId || !pairingUrl) return;
     void import("qrcode").then((QRCode) =>
-      QRCode.toDataURL(pairingUrl, { margin: 2, width: 220 }).then(setQrDataUrl)
+      QRCode.toDataURL(pairingUrl, {
+        margin: 2,
+        width: 240,
+        color: { dark: "#6366f1", light: "#ffffff00" },
+      }).then(setQrDataUrl)
     );
-  }, [roomId, deviceId]);
+  }, [pairingUrl, deviceId]);
+
+  const copyLink = () => {
+    void navigator.clipboard.writeText(pairingUrl);
+    toast.success("Pairing link copied");
+  };
 
   const stopScanner = useCallback(async () => {
     if (scannerRef.current?.isScanning) {
@@ -71,14 +86,12 @@ export function QrPairing({ roomId, deviceId, onPair }: QrPairingProps) {
                 setScanOpen(false);
               }
             } catch {
-              /* not a valid pairing URL */
+              /* invalid */
             }
           },
           () => {}
         )
-        .catch(() => {
-          setScanOpen(false);
-        });
+        .catch(() => setScanOpen(false));
     });
 
     return () => {
@@ -90,41 +103,50 @@ export function QrPairing({ roomId, deviceId, onPair }: QrPairingProps) {
   return (
     <Sheet>
       <SheetTrigger asChild>
-        <Button variant="outline" size="sm">
-          <QrCode className="mr-2 h-4 w-4" />
-          QR Pair
+        <Button variant="outline" size="sm" className="h-9 rounded-xl gap-1.5">
+          <QrCode className="h-4 w-4" />
+          <span className="hidden sm:inline">Pair</span>
         </Button>
       </SheetTrigger>
-      <SheetContent side="right" className="w-full sm:max-w-md">
+      <SheetContent side="right" className="w-full border-border/50 bg-background/95 backdrop-blur-2xl sm:max-w-md">
         <SheetHeader>
-          <SheetTitle>Pair via QR</SheetTitle>
+          <SheetTitle>Pair devices</SheetTitle>
         </SheetHeader>
-        <div className="mt-6 flex flex-col items-center gap-6">
-          <div className="rounded-2xl border bg-white p-4 dark:bg-zinc-900">
+        <div className="mt-8 flex flex-col items-center gap-6">
+          <div className="rounded-3xl border border-border/60 bg-white/80 p-5 shadow-xl dark:bg-card/80">
             {qrDataUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={qrDataUrl} alt="Pairing QR code" width={220} height={220} />
+              <img src={qrDataUrl} alt="Pairing QR code" width={240} height={240} className="rounded-lg" />
             ) : (
-              <div className="h-[220px] w-[220px] animate-pulse rounded bg-muted" />
+              <div className="h-[240px] w-[240px] animate-pulse rounded-lg bg-muted" />
             )}
           </div>
-          <p className="max-w-xs text-center text-sm text-muted-foreground">
-            Scan this code on another device to join room{" "}
-            <span className="font-mono text-foreground">{roomId}</span>
-          </p>
-          <Button variant="secondary" onClick={() => setScanOpen(true)}>
-            <ScanLine className="mr-2 h-4 w-4" />
-            Scan QR Code
-          </Button>
+          <div className="text-center">
+            <p className={subtleText}>Room</p>
+            <p className="mt-1 font-mono text-lg font-semibold">{roomId}</p>
+          </div>
+          <div className="flex w-full max-w-xs flex-col gap-2">
+            <Button variant="secondary" className="rounded-xl" onClick={copyLink}>
+              <Copy className="mr-2 h-4 w-4" />
+              Copy invite link
+            </Button>
+            <Button variant="outline" className="rounded-xl" onClick={() => setScanOpen(true)}>
+              <ScanLine className="mr-2 h-4 w-4" />
+              Scan QR code
+            </Button>
+          </div>
         </div>
         <Dialog open={scanOpen} onOpenChange={setScanOpen}>
-          <DialogContent className="sm:max-w-lg">
+          <DialogContent className="rounded-2xl sm:max-w-lg">
             <DialogHeader>
-              <DialogTitle>Scan QR Code</DialogTitle>
-              <DialogDescription>Point your camera at a Peer Beam QR code</DialogDescription>
+              <DialogTitle>Scan QR code</DialogTitle>
+              <DialogDescription>Point your camera at another peer-beam QR</DialogDescription>
             </DialogHeader>
-            <div id={scanRegionId} className="min-h-[280px] w-full overflow-hidden rounded-lg" />
-            <Button variant="ghost" onClick={() => setScanOpen(false)}>
+            <div
+              id={scanRegionId}
+              className="min-h-[280px] w-full overflow-hidden rounded-xl border border-border/60"
+            />
+            <Button variant="ghost" className="rounded-xl" onClick={() => setScanOpen(false)}>
               <X className="mr-2 h-4 w-4" />
               Close
             </Button>

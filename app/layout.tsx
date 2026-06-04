@@ -29,12 +29,13 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
+        suppressHydrationWarning
         className={`${geistSans.variable} ${geistMono.variable} font-sans antialiased`}
       >
         <ThemeProvider>
           <TooltipProvider>
             {children}
-            <Toaster richColors position="bottom-right" />
+            <Toaster richColors position="top-center" className="sm:top-right" />
           </TooltipProvider>
         </ThemeProvider>
       </body>

@@ -52,10 +52,29 @@ export type ControlMessage =
   | { type: "transfer-resume"; id: string; fromChunk: number }
   | { type: "chunk-meta"; id: string; index: number; size: number }
   | { type: "chunk-ack"; id: string; index: number }
-  | { type: "text"; content: string }
-  | { type: "link"; url: string }
   | { type: "ping" }
   | { type: "pong" };
+
+/** Wire format for real-time chat over the data channel (see encodeWireChat). */
+export type WireChatMessage = {
+  type: "text" | "link";
+  data: string;
+  timestamp: number;
+  senderId: DeviceId;
+  senderName: string;
+};
+
+export type ChatMessageDirection = "incoming" | "outgoing";
+
+export interface ChatMessage {
+  id: string;
+  type: "text" | "link";
+  data: string;
+  timestamp: number;
+  peerId: DeviceId;
+  peerName: string;
+  direction: ChatMessageDirection;
+}
 
 export interface ChunkHeader {
   transferId: string;

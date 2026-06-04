@@ -1,18 +1,16 @@
 "use client";
 
-import { FolderOpen, Upload } from "lucide-react";
+import { FolderOpen, ImageIcon, Upload } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 interface DropZoneProps {
   onFiles: (files: FileList | File[]) => void;
   disabled?: boolean;
-  selectedPeerName?: string | null;
 }
 
-export function DropZone({ onFiles, disabled, selectedPeerName }: DropZoneProps) {
+export function DropZone({ onFiles, disabled }: DropZoneProps) {
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const folderRef = useRef<HTMLInputElement>(null);
@@ -28,89 +26,104 @@ export function DropZone({ onFiles, disabled, selectedPeerName }: DropZoneProps)
   );
 
   return (
-    <Card className="flex h-full flex-col border-border/60 bg-card/80 backdrop-blur-sm">
-      <CardHeader>
-        <CardTitle className="text-base font-semibold">Share Files</CardTitle>
-        <CardDescription>
-          {selectedPeerName
-            ? `Sending to ${selectedPeerName}`
-            : "Drop files to send to all connected peers"}
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-1 flex-col gap-4">
+    <div className="flex flex-1 flex-col p-5">
+      <div
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => e.key === "Enter" && inputRef.current?.click()}
+        onDragOver={(e) => {
+          e.preventDefault();
+          if (!disabled) setDragOver(true);
+        }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={handleDrop}
+        onClick={() => !disabled && inputRef.current?.click()}
+        className={cn(
+          "relative flex min-h-[340px] flex-1 cursor-pointer flex-col items-center justify-center gap-6 overflow-hidden rounded-3xl transition-all duration-300",
+          dragOver
+            ? "bg-gradient-to-b from-primary/15 to-cyan-500/10 ring-2 ring-primary ring-offset-2 ring-offset-card"
+            : "bg-gradient-to-b from-muted/30 to-muted/10 hover:from-muted/40 hover:to-muted/20",
+          disabled && "cursor-not-allowed opacity-40"
+        )}
+      >
         <div
-          role="button"
-          tabIndex={0}
-          onKeyDown={(e) => e.key === "Enter" && inputRef.current?.click()}
-          onDragOver={(e) => {
-            e.preventDefault();
-            if (!disabled) setDragOver(true);
-          }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={handleDrop}
-          onClick={() => !disabled && inputRef.current?.click()}
           className={cn(
-            "flex min-h-[280px] flex-1 cursor-pointer flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed p-8 transition-all",
-            dragOver
-              ? "border-primary bg-primary/10 scale-[1.01]"
-              : "border-muted-foreground/25 hover:border-primary/50 hover:bg-muted/30",
-            disabled && "pointer-events-none opacity-50"
+            "flex h-24 w-24 items-center justify-center rounded-[1.75rem] bg-background shadow-lg transition-transform duration-300",
+            dragOver && "scale-105"
           )}
         >
-          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/15">
-            <Upload className="h-8 w-8 text-primary" />
-          </div>
-          <div className="text-center">
-            <p className="font-medium">Drag & drop files here</p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              or click to browse · multiple files supported
-            </p>
+          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 text-white shadow-lg shadow-indigo-500/30">
+            <Upload className="h-8 w-8" strokeWidth={2} />
           </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            type="button"
-            variant="default"
-            className="flex-1"
-            disabled={disabled}
-            onClick={() => inputRef.current?.click()}
-          >
-            <Upload className="mr-2 h-4 w-4" />
-            Select Files
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={disabled}
-            onClick={() => folderRef.current?.click()}
-          >
-            <FolderOpen className="mr-2 h-4 w-4" />
-            Folder
-          </Button>
+
+        <div className="max-w-sm text-center">
+          <p className="text-xl font-semibold tracking-tight">
+            {dragOver ? "Drop to beam" : "Drop files to beam"}
+          </p>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Photos, videos, documents, or entire folders — encrypted peer-to-peer.
+          </p>
         </div>
-        <input
-          ref={inputRef}
-          type="file"
-          multiple
-          className="hidden"
-          onChange={(e) => {
-            if (e.target.files?.length) onFiles(e.target.files);
-            e.target.value = "";
+
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <ImageIcon className="h-3.5 w-3.5" />
+          <span>Any file type</span>
+        </div>
+      </div>
+
+      <div className="mt-4 flex gap-3">
+        <Button
+          type="button"
+          size="lg"
+          className="h-12 flex-1 rounded-2xl text-base font-medium shadow-lg shadow-primary/20"
+          disabled={disabled}
+          onClick={(e) => {
+            e.stopPropagation();
+            inputRef.current?.click();
           }}
-        />
-        <input
-          ref={folderRef}
-          type="file"
-          // @ts-expect-error webkitdirectory is non-standard but widely supported
-          webkitdirectory=""
-          multiple
-          className="hidden"
-          onChange={(e) => {
-            if (e.target.files?.length) onFiles(e.target.files);
-            e.target.value = "";
+        >
+          <Upload className="mr-2 h-5 w-5" />
+          Choose files
+        </Button>
+        <Button
+          type="button"
+          size="lg"
+          variant="outline"
+          className="h-12 rounded-2xl px-6"
+          disabled={disabled}
+          onClick={(e) => {
+            e.stopPropagation();
+            folderRef.current?.click();
           }}
-        />
-      </CardContent>
-    </Card>
+        >
+          <FolderOpen className="mr-2 h-5 w-5" />
+          Folder
+        </Button>
+      </div>
+
+      <input
+        ref={inputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          if (e.target.files?.length) onFiles(e.target.files);
+          e.target.value = "";
+        }}
+      />
+      <input
+        ref={folderRef}
+        type="file"
+        // @ts-expect-error webkitdirectory is non-standard but widely supported
+        webkitdirectory=""
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          if (e.target.files?.length) onFiles(e.target.files);
+          e.target.value = "";
+        }}
+      />
+    </div>
   );
 }

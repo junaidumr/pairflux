@@ -3,6 +3,8 @@ export const CHUNK_SIZE = 32 * 1024;
 export const BUFFERED_AMOUNT_HIGH = 8 * 1024 * 1024;
 /** Resume sending after drain event drops below this (bytes). */
 export const BUFFERED_AMOUNT_LOW = 1 * 1024 * 1024;
+/** Max wait before sending chat/text (avoid blocking behind large file buffers). */
+export const CHAT_BUFFER_DRAIN_TIMEOUT_MS = 5_000;
 export const CHUNK_ACK_TIMEOUT_MS = 30_000;
 export const MAX_CHUNK_RETRIES = 8;
 export const RECONNECT_DELAY_MS = 2000;

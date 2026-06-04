@@ -1,19 +1,111 @@
 "use client";
 
+import { Activity, Share2, Users } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppHeader } from "@/components/share/app-header";
+import { AppShell } from "@/components/share/app-shell";
 import { DeviceList } from "@/components/share/device-list";
 import { DropZone } from "@/components/share/drop-zone";
-import { TextShare } from "@/components/share/text-share";
+import { RecipientBar } from "@/components/share/recipient-bar";
+import { ChatPanel } from "@/components/share/chat-panel";
 import { TransferDialog } from "@/components/share/transfer-dialog";
 import { TransferPanel } from "@/components/share/transfer-panel";
+import { LoadingScreen } from "@/components/layout/loading-screen";
+import { MeshBackground } from "@/components/layout/mesh-background";
+import { filterMessagesForPeer } from "@/lib/chat";
 import { usePeerBeam } from "@/hooks/use-peer-beam";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { PairingPayload } from "@/types";
+
+type MobileTab = "devices" | "share" | "transfers";
+
+function ShareWorkspace({
+  peers,
+  deviceId,
+  deviceName,
+  connectedPeers,
+  selectedPeerId,
+  onSelectPeer,
+  onConnect,
+  selectedPeerName,
+  otherPeerCount,
+  ready,
+  transfers,
+  onFiles,
+  messages,
+  onSendText,
+  onSendLink,
+  onCancel,
+  onRetry,
+  onClearSelection,
+}: {
+  peers: Parameters<typeof DeviceList>[0]["peers"];
+  deviceId: string;
+  deviceName: string;
+  connectedPeers: Set<string>;
+  selectedPeerId: string | null;
+  onSelectPeer: (id: string | null) => void;
+  onConnect: (id: string) => void;
+  selectedPeerName: string | null;
+  otherPeerCount: number;
+  ready: boolean;
+  transfers: Parameters<typeof TransferPanel>[0]["transfers"];
+  onFiles: (files: FileList | File[]) => void;
+  messages: Parameters<typeof ChatPanel>[0]["messages"];
+  onSendText: (t: string) => void | Promise<void>;
+  onSendLink: (u: string) => void | Promise<void>;
+  onCancel: (id: string) => void;
+  onRetry: (id: string) => void;
+  onClearSelection: () => void;
+}) {
+  const disabled = !ready || otherPeerCount === 0;
+
+  return (
+    <AppShell className="min-h-[calc(100vh-7.5rem)] lg:flex-row">
+      <DeviceList
+        peers={peers}
+        localId={deviceId}
+        localName={deviceName}
+        connectedPeers={connectedPeers}
+        selectedPeerId={selectedPeerId}
+        onSelectPeer={onSelectPeer}
+        onConnect={onConnect}
+      />
+
+      <section className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <RecipientBar
+          selectedPeerName={selectedPeerName}
+          peerCount={otherPeerCount}
+          onClearSelection={onClearSelection}
+          disabled={disabled}
+        />
+        <DropZone onFiles={onFiles} disabled={disabled} />
+        <ChatPanel
+          messages={messages}
+          localName={deviceName}
+          selectedPeerName={selectedPeerName}
+          onSendText={onSendText}
+          onSendLink={onSendLink}
+          disabled={disabled}
+        />
+      </section>
+
+      <TransferPanel
+        transfers={transfers}
+        onCancel={onCancel}
+        onRetry={onRetry}
+        className="hidden lg:flex"
+      />
+    </AppShell>
+  );
+}
 
 export function ShareClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const [mobileTab, setMobileTab] = useState<MobileTab>("share");
+
   const {
     peers,
     transfers,
@@ -25,6 +117,7 @@ export function ShareClient() {
     ready,
     connectToPeer,
     sendFiles,
+    messages,
     sendText,
     sendLink,
     rename,
@@ -45,6 +138,7 @@ export function ShareClient() {
   }, [searchParams, connectToPeer]);
 
   const selectedPeer = peers.find((p) => p.id === selectedPeerId);
+  const otherPeerCount = peers.filter((p) => p.id !== deviceId).length;
   const pendingIncoming = useMemo(
     () =>
       transfers.find(
@@ -70,20 +164,44 @@ export function ShareClient() {
   const handleFiles = useCallback(
     (files: FileList | File[]) => {
       void sendFiles(files, selectedPeerId ?? undefined);
+      setMobileTab("transfers");
     },
     [sendFiles, selectedPeerId]
   );
 
+  const visibleMessages = useMemo(
+    () => filterMessagesForPeer(messages, selectedPeerId),
+    [messages, selectedPeerId]
+  );
+
+  const workspaceProps = {
+    peers,
+    deviceId,
+    deviceName,
+    connectedPeers,
+    selectedPeerId,
+    onSelectPeer: setSelectedPeerId,
+    onConnect: connectToPeer,
+    selectedPeerName: selectedPeer?.name ?? null,
+    otherPeerCount,
+    ready,
+    transfers,
+    messages: visibleMessages,
+    onFiles: handleFiles,
+    onSendText: (t: string) => sendText(t, selectedPeerId ?? undefined),
+    onSendLink: (u: string) => sendLink(u, selectedPeerId ?? undefined),
+    onCancel: cancelTransfer,
+    onRetry: retryTransfer,
+    onClearSelection: () => setSelectedPeerId(null),
+  };
+
   if (!initialized) {
-    return (
-      <div className="flex min-h-screen items-center justify-center text-muted-foreground">
-        Connecting…
-      </div>
-    );
+    return <LoadingScreen />;
   }
 
   return (
-    <div className="flex min-h-screen flex-col bg-gradient-to-b from-background via-background to-muted/30">
+    <div className="relative flex min-h-screen flex-col">
+      <MeshBackground />
       <AppHeader
         deviceName={deviceName}
         roomId={roomId}
@@ -92,40 +210,89 @@ export function ShareClient() {
         onRename={rename}
         onPair={handlePair}
       />
-      <main className="mx-auto grid w-full max-w-[1600px] flex-1 gap-4 p-4 lg:grid-cols-[280px_1fr_300px]">
-        <aside className="min-h-[320px] lg:min-h-0">
-          <DeviceList
-            peers={peers}
-            localId={deviceId}
-            localName={deviceName}
-            connectedPeers={connectedPeers}
-            selectedPeerId={selectedPeerId}
-            onSelectPeer={setSelectedPeerId}
-            onConnect={connectToPeer}
-          />
-        </aside>
-        <section className="flex min-h-0 flex-col gap-4">
-          <DropZone
-            onFiles={handleFiles}
-            disabled={!ready || peers.filter((p) => p.id !== deviceId).length === 0}
-            selectedPeerName={selectedPeer?.name ?? null}
-          />
-          <div className="rounded-xl border border-border/60 bg-card/80 p-4 backdrop-blur-sm">
-            <TextShare
-              onSendText={(t) => sendText(t, selectedPeerId ?? undefined)}
-              onSendLink={(u) => sendLink(u, selectedPeerId ?? undefined)}
-              disabled={!ready}
-            />
+
+      <div className="mx-auto hidden w-full max-w-6xl flex-1 px-4 pb-6 pt-4 lg:block">
+        <ShareWorkspace {...workspaceProps} />
+      </div>
+
+      <main className="flex flex-1 flex-col pb-[4.5rem] lg:hidden">
+        <Tabs
+          value={mobileTab}
+          onValueChange={(v) => setMobileTab(v as MobileTab)}
+          className="flex flex-1 flex-col"
+        >
+          <div className="flex-1 px-3 pt-3">
+            <TabsContent value="devices" className="mt-0 h-full">
+              <AppShell className="min-h-[calc(100vh-11rem)]">
+                <DeviceList
+                  peers={peers}
+                  localId={deviceId}
+                  localName={deviceName}
+                  connectedPeers={connectedPeers}
+                  selectedPeerId={selectedPeerId}
+                  onSelectPeer={setSelectedPeerId}
+                  onConnect={connectToPeer}
+                />
+              </AppShell>
+            </TabsContent>
+            <TabsContent value="share" className="mt-0">
+              <AppShell className="min-h-[calc(100vh-11rem)] flex-col">
+                <RecipientBar
+                  selectedPeerName={selectedPeer?.name ?? null}
+                  peerCount={otherPeerCount}
+                  onClearSelection={() => setSelectedPeerId(null)}
+                  disabled={!ready || otherPeerCount === 0}
+                />
+                <DropZone
+                  onFiles={handleFiles}
+                  disabled={!ready || otherPeerCount === 0}
+                />
+                <ChatPanel
+                  messages={visibleMessages}
+                  localName={deviceName}
+                  selectedPeerName={selectedPeer?.name ?? null}
+                  onSendText={(t) => sendText(t, selectedPeerId ?? undefined)}
+                  onSendLink={(u) => sendLink(u, selectedPeerId ?? undefined)}
+                  disabled={!ready || otherPeerCount === 0}
+                />
+              </AppShell>
+            </TabsContent>
+            <TabsContent value="transfers" className="mt-0">
+              <AppShell className="min-h-[calc(100vh-11rem)] flex-col">
+                <TransferPanel
+                  transfers={transfers}
+                  onCancel={cancelTransfer}
+                  onRetry={retryTransfer}
+                  className="flex flex-1 border-l-0"
+                />
+              </AppShell>
+            </TabsContent>
           </div>
-        </section>
-        <aside className="min-h-[320px] lg:min-h-0">
-          <TransferPanel
-            transfers={transfers}
-            onCancel={cancelTransfer}
-            onRetry={retryTransfer}
-          />
-        </aside>
+
+          <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-border/50 bg-background/95 px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl">
+            <TabsList className="grid h-11 w-full grid-cols-3 rounded-2xl bg-muted/60 p-1">
+              <TabsTrigger value="devices" className="gap-1 rounded-xl text-[11px]">
+                <Users className="h-4 w-4" />
+                Peers
+              </TabsTrigger>
+              <TabsTrigger value="share" className="gap-1 rounded-xl text-[11px]">
+                <Share2 className="h-4 w-4" />
+                Beam
+              </TabsTrigger>
+              <TabsTrigger value="transfers" className="relative gap-1 rounded-xl text-[11px]">
+                <Activity className="h-4 w-4" />
+                Activity
+                {transfers.some(
+                  (t) => t.status === "transferring" || t.status === "awaiting-accept"
+                ) && (
+                  <span className="absolute right-3 top-1 h-1.5 w-1.5 rounded-full bg-primary" />
+                )}
+              </TabsTrigger>
+            </TabsList>
+          </nav>
+        </Tabs>
       </main>
+
       <TransferDialog
         transfer={pendingIncoming}
         onAccept={acceptTransfer}

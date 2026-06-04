@@ -10,13 +10,15 @@ import {
   setDeviceName,
 } from "@/lib/device";
 import { SignalingClient } from "@/lib/signaling";
+import { createOutgoingChat, wireToIncomingChat } from "@/lib/chat";
 import { TransferEngine } from "@/lib/transfer";
 import { WebRTCManager } from "@/lib/webrtc";
-import type { ControlMessage, PeerDevice, TransferItem } from "@/types";
+import type { ChatMessage, PeerDevice, TransferItem } from "@/types";
 
 export function usePeerBeam() {
   const [peers, setPeers] = useState<PeerDevice[]>([]);
   const [transfers, setTransfers] = useState<TransferItem[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [connectedPeers, setConnectedPeers] = useState<Set<string>>(new Set());
   const [initialized, setInitialized] = useState(false);
   const [deviceId, setDeviceId] = useState("");
@@ -48,6 +50,13 @@ export function usePeerBeam() {
     });
   }, []);
 
+  const appendMessage = useCallback((msg: ChatMessage) => {
+    setMessages((prev) => {
+      if (prev.some((m) => m.id === msg.id)) return prev;
+      return [...prev, msg];
+    });
+  }, []);
+
   useEffect(() => {
     if (!initialized || !deviceId) return;
 
@@ -66,21 +75,17 @@ export function usePeerBeam() {
         if (!parsed) return;
         const peerName = peerNamesRef.current.get(peerId) ?? "Peer";
 
+        if (parsed.kind === "chat") {
+          appendMessage(wireToIncomingChat(peerId, peerName, parsed.message));
+          return;
+        }
+
         if (parsed.kind === "control") {
           void transferRef.current?.handleControl(peerId, peerName, parsed.message);
-          if (parsed.message.type === "text") {
-            toast.info(`${peerName}: ${parsed.message.content}`);
-          }
-          if (parsed.message.type === "link") {
-            const url = parsed.message.url;
-            toast.info(`${peerName} shared a link`, {
-              action: {
-                label: "Open",
-                onClick: () => window.open(url, "_blank", "noopener,noreferrer"),
-              },
-            });
-          }
-        } else if (parsed.kind === "chunk") {
+          return;
+        }
+
+        if (parsed.kind === "chunk") {
           void transferRef.current?.handleChunk(
             peerId,
             peerName,
@@ -153,11 +158,22 @@ export function usePeerBeam() {
       webrtc.disconnectAll();
       signaling.disconnect();
     };
-  }, [initialized, deviceId, deviceName, roomId, updateTransfer]);
+  }, [initialized, deviceId, deviceName, roomId, updateTransfer, appendMessage]);
 
   const connectToPeer = useCallback(async (peerId: string) => {
     await webrtcRef.current?.connectToPeer(peerId, deviceId > peerId);
   }, [deviceId]);
+
+  const ensurePeerReady = useCallback(
+    async (peerId: string, peerName: string): Promise<boolean> => {
+      if (webrtcRef.current?.isConnected(peerId)) return true;
+      await connectToPeer(peerId);
+      if (webrtcRef.current?.isConnected(peerId)) return true;
+      toast.error(`Could not connect to ${peerName}`);
+      return false;
+    },
+    [connectToPeer]
+  );
 
   const sendFiles = useCallback(
     async (files: FileList | File[], targetPeerId?: string) => {
@@ -188,39 +204,77 @@ export function usePeerBeam() {
   );
 
   const sendText = useCallback(
-    (content: string, targetPeerId?: string) => {
-      const msg: ControlMessage = { type: "text", content };
-      const targets = targetPeerId ? peers.filter((p) => p.id === targetPeerId) : peers;
+    async (content: string, targetPeerId?: string) => {
+      const targets = targetPeerId
+        ? peers.filter((p) => p.id === targetPeerId)
+        : peers;
       if (targets.length === 0) {
         toast.error("No peers online");
         return;
       }
+
+      let sentCount = 0;
       for (const peer of targets) {
-        if (!webrtcRef.current?.sendControl(peer.id, msg)) {
+        if (!(await ensurePeerReady(peer.id, peer.name))) continue;
+        const { wire, ui } = createOutgoingChat(
+          "text",
+          content,
+          peer.id,
+          peer.name,
+          deviceId,
+          deviceName
+        );
+        const ok = await webrtcRef.current?.sendChat(peer.id, wire);
+        if (ok) {
+          appendMessage(ui);
+          sentCount++;
+        } else {
           toast.error(`Failed to send to ${peer.name}`);
         }
       }
-      toast.success("Message sent");
+      if (sentCount > 0) toast.success("Message sent");
     },
-    [peers]
+    [peers, deviceId, deviceName, ensurePeerReady, appendMessage]
   );
 
   const sendLink = useCallback(
-    (url: string, targetPeerId?: string) => {
+    async (url: string, targetPeerId?: string) => {
       try {
         new URL(url);
       } catch {
         toast.error("Invalid URL");
         return;
       }
-      const msg: ControlMessage = { type: "link", url };
-      const targets = targetPeerId ? peers.filter((p) => p.id === targetPeerId) : peers;
-      for (const peer of targets) {
-        webrtcRef.current?.sendControl(peer.id, msg);
+      const targets = targetPeerId
+        ? peers.filter((p) => p.id === targetPeerId)
+        : peers;
+      if (targets.length === 0) {
+        toast.error("No peers online");
+        return;
       }
-      toast.success("Link sent");
+
+      let sentCount = 0;
+      for (const peer of targets) {
+        if (!(await ensurePeerReady(peer.id, peer.name))) continue;
+        const { wire, ui } = createOutgoingChat(
+          "link",
+          url,
+          peer.id,
+          peer.name,
+          deviceId,
+          deviceName
+        );
+        const ok = await webrtcRef.current?.sendChat(peer.id, wire);
+        if (ok) {
+          appendMessage(ui);
+          sentCount++;
+        } else {
+          toast.error(`Failed to send link to ${peer.name}`);
+        }
+      }
+      if (sentCount > 0) toast.success("Link sent");
     },
-    [peers]
+    [peers, deviceId, deviceName, ensurePeerReady, appendMessage]
   );
 
   const rename = useCallback((name: string) => {
@@ -231,6 +285,7 @@ export function usePeerBeam() {
   return {
     peers,
     transfers,
+    messages,
     connectedPeers,
     initialized,
     deviceId,
