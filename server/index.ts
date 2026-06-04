@@ -3,6 +3,7 @@ import express from "express";
 import rateLimit from "express-rate-limit";
 import { createServer } from "http";
 import { Server, Socket } from "socket.io";
+import { PairingStore } from "./pairing-store";
 
 const PORT = Number(process.env.PORT ?? 3001);
 const CORS_ORIGIN = process.env.CORS_ORIGIN ?? "http://localhost:3000";
@@ -40,6 +41,7 @@ const io = new Server(httpServer, {
 });
 
 const peers = new Map<string, PeerMeta>();
+const pairingStore = new PairingStore();
 
 const limiter = rateLimit({
   windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS ?? 60_000),
@@ -166,6 +168,94 @@ io.on("connection", (socket: Socket) => {
     if (meta) meta.lastSeen = Date.now();
   });
 
+  socket.on(
+    "pairing-code",
+    (payload: { type?: string; code?: string; from?: string }) => {
+      const meta = peers.get(socket.id);
+      if (!meta || !room || meta.id !== sanitizeId(payload?.from)) return;
+
+      const code = typeof payload?.code === "string" ? payload.code.trim() : "";
+      const result = pairingStore.register(meta.room, meta.id, socket.id, code);
+      if (!result.ok) {
+        socket.emit("pairing-failed", {
+          type: "pairing-failed",
+          message: result.reason,
+          reason: "register",
+        });
+        return;
+      }
+      socket.emit("pairing-code-ack", { type: "pairing-code-ack", code, from: meta.id });
+    }
+  );
+
+  socket.on(
+    "pairing-verify",
+    (payload: { type?: string; code?: string; deviceId?: string }) => {
+      const meta = peers.get(socket.id);
+      if (!meta || !room) return;
+
+      const receiverId = sanitizeId(payload?.deviceId);
+      if (!receiverId || receiverId !== meta.id) {
+        socket.emit("pairing-failed", {
+          type: "pairing-failed",
+          message: "Invalid device",
+          reason: "device",
+        });
+        return;
+      }
+
+      const code = typeof payload?.code === "string" ? payload.code.trim() : "";
+      const result = pairingStore.verify(meta.room, code, receiverId);
+      if (!result.ok) {
+        socket.emit("pairing-failed", {
+          type: "pairing-failed",
+          message: result.reason,
+          reason: "verify",
+        });
+        return;
+      }
+
+      const hostMeta = [...peers.values()].find(
+        (p) => p.id === result.hostId && p.room === meta.room
+      );
+      if (!hostMeta) {
+        socket.emit("pairing-failed", {
+          type: "pairing-failed",
+          message: "Host offline",
+          reason: "host-offline",
+        });
+        return;
+      }
+
+      const successHost = {
+        type: "pairing-success" as const,
+        sessionId: result.sessionId,
+        peerId: receiverId,
+        peerName: meta.name,
+        peerAvatar: meta.avatar,
+      };
+      const successReceiver = {
+        type: "pairing-success" as const,
+        sessionId: result.sessionId,
+        peerId: result.hostId,
+        peerName: hostMeta.name,
+        peerAvatar: hostMeta.avatar,
+      };
+
+      io.to(result.hostSocketId).emit("pairing-success", successHost);
+      socket.emit("pairing-success", successReceiver);
+    }
+  );
+
+  socket.on("pairing-cancel", (payload: { code?: string; from?: string }) => {
+    const meta = peers.get(socket.id);
+    if (!meta || !room) return;
+    const code = typeof payload?.code === "string" ? payload.code.trim() : "";
+    const from = sanitizeId(payload?.from);
+    if (!code || from !== meta.id) return;
+    pairingStore.cancel(meta.room, meta.id, code);
+  });
+
   socket.on("disconnect", () => {
     const meta = peers.get(socket.id);
     if (meta && room) {
@@ -177,6 +267,7 @@ io.on("connection", (socket: Socket) => {
 });
 
 setInterval(() => {
+  pairingStore.purgeExpired();
   const now = Date.now();
   const timeout = Number(process.env.INACTIVE_TIMEOUT_MS ?? 5 * 60 * 1000);
   for (const [sid, meta] of peers) {

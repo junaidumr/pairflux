@@ -9,6 +9,7 @@ import {
   Zap,
 } from "lucide-react";
 import Link from "next/link";
+import { StartSharingLink } from "@/components/landing/start-sharing-link";
 import { PeerBeamLogo } from "@/components/brand/peer-beam-logo";
 import { MeshBackground } from "@/components/layout/mesh-background";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
@@ -79,16 +80,7 @@ export default function LandingPage() {
               fast, private, and free.
             </p>
             <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
-              <Button
-                asChild
-                size="lg"
-                className="h-12 rounded-xl px-8 text-base glow-primary"
-              >
-                <Link href="/share">
-                  Start sharing
-                  <ArrowRight className="ml-2 h-5 w-5" />
-                </Link>
-              </Button>
+              <StartSharingLink className="h-12 rounded-xl px-8 text-base glow-primary" />
               <Button asChild variant="outline" size="lg" className="h-12 rounded-xl px-8">
                 <Link href="/share?room=demo">Try demo room</Link>
               </Button>

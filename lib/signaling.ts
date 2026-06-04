@@ -2,7 +2,12 @@
 
 import { io, Socket } from "socket.io-client";
 import { getSignalingUrl, SIGNALING_PATH } from "@/lib/constants";
-import type { PeerDevice, SignalPayload } from "@/types";
+import type {
+  PairingFailedPayload,
+  PairingSuccessPayload,
+  PeerDevice,
+  SignalPayload,
+} from "@/types";
 
 export type SignalingEvents = {
   peers: (peers: PeerDevice[]) => void;
@@ -13,6 +18,9 @@ export type SignalingEvents = {
   error: (payload: { message: string }) => void;
   connect: () => void;
   disconnect: () => void;
+  "pairing-code-ack": (payload: { type: "pairing-code-ack"; code: string; from: string }) => void;
+  "pairing-success": (payload: PairingSuccessPayload) => void;
+  "pairing-failed": (payload: PairingFailedPayload) => void;
 };
 
 export class SignalingClient {
@@ -49,6 +57,9 @@ export class SignalingClient {
     bind("error");
     bind("connect");
     bind("disconnect");
+    bind("pairing-code-ack");
+    bind("pairing-success");
+    bind("pairing-failed");
 
     this.socket.on("connect", () => {
       this.socket?.emit("join", { id: deviceId, name, avatar, room });
@@ -72,6 +83,18 @@ export class SignalingClient {
 
   sendSignal(payload: SignalPayload): void {
     this.socket?.emit("signal", payload);
+  }
+
+  emitPairingCode(code: string, from: string): void {
+    this.socket?.emit("pairing-code", { type: "pairing-code", code, from });
+  }
+
+  emitPairingVerify(code: string, deviceId: string): void {
+    this.socket?.emit("pairing-verify", { type: "pairing-verify", code, deviceId });
+  }
+
+  emitPairingCancel(code: string, from: string): void {
+    this.socket?.emit("pairing-cancel", { code, from });
   }
 
   heartbeat(): void {

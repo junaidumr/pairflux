@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { createOutgoingChat, wireToIncomingChat } from "@/lib/chat";
 import {
   getAvatarColor,
   getOrCreateDeviceId,
@@ -9,27 +10,45 @@ import {
   getRoomId,
   setDeviceName,
 } from "@/lib/device";
+import { generatePairingCode } from "@/lib/pairing-code";
 import { SignalingClient } from "@/lib/signaling";
-import { createOutgoingChat, wireToIncomingChat } from "@/lib/chat";
+import {
+  addTrustedPeer,
+  getTrustedPeerIds,
+  isTrustedPeer,
+} from "@/lib/trusted-peers";
 import { TransferEngine } from "@/lib/transfer";
 import { WebRTCManager } from "@/lib/webrtc";
-import type { ChatMessage, PeerDevice, TransferItem } from "@/types";
+import type {
+  ChatMessage,
+  PairingPhase,
+  PairingSuccessPayload,
+  PeerDevice,
+  TransferItem,
+} from "@/types";
 
 export function usePeerBeam() {
   const [peers, setPeers] = useState<PeerDevice[]>([]);
   const [transfers, setTransfers] = useState<TransferItem[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [connectedPeers, setConnectedPeers] = useState<Set<string>>(new Set());
+  const [pairedPeerIds, setPairedPeerIds] = useState<Set<string>>(() => new Set());
   const [initialized, setInitialized] = useState(false);
   const [deviceId, setDeviceId] = useState("");
   const [deviceName, setNameState] = useState("");
   const [roomId, setRoomId] = useState("public");
   const [ready, setReady] = useState(false);
 
+  const [pairingPhase, setPairingPhase] = useState<PairingPhase>("idle");
+  const [pairingCode, setPairingCode] = useState<string | null>(null);
+  const [pairingError, setPairingError] = useState<string | null>(null);
+  const [lastPairedPeerId, setLastPairedPeerId] = useState<string | null>(null);
+
   useEffect(() => {
     setDeviceId(getOrCreateDeviceId());
     setNameState(getOrCreateDeviceName());
     setRoomId(getRoomId());
+    setPairedPeerIds(new Set(getTrustedPeerIds()));
     setInitialized(true);
   }, []);
 
@@ -37,6 +56,20 @@ export function usePeerBeam() {
   const webrtcRef = useRef<WebRTCManager | null>(null);
   const transferRef = useRef<TransferEngine | null>(null);
   const peerNamesRef = useRef<Map<string, string>>(new Map());
+  const pairedRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    pairedRef.current = pairedPeerIds;
+  }, [pairedPeerIds]);
+
+  const markPaired = useCallback((peerId: string) => {
+    setPairedPeerIds((prev) => {
+      if (prev.has(peerId)) return prev;
+      const next = new Set(prev);
+      next.add(peerId);
+      return next;
+    });
+  }, []);
 
   const updateTransfer = useCallback((item: TransferItem) => {
     setTransfers((prev) => {
@@ -56,6 +89,51 @@ export function usePeerBeam() {
       return [...prev, msg];
     });
   }, []);
+
+  const connectToPeer = useCallback(async (peerId: string) => {
+    await webrtcRef.current?.connectToPeer(peerId, deviceId > peerId);
+  }, [deviceId]);
+
+  const connectIfPaired = useCallback(
+    (peerId: string) => {
+      if (!pairedRef.current.has(peerId) && !isTrustedPeer(peerId)) return;
+      void connectToPeer(peerId);
+    },
+    [connectToPeer]
+  );
+
+  const handlePairingSuccess = useCallback(
+    (payload: PairingSuccessPayload) => {
+      const { sessionId, peerId, peerName, peerAvatar } = payload;
+      peerNamesRef.current.set(peerId, peerName);
+      addTrustedPeer({
+        peerId,
+        sessionId,
+        peerName,
+        timestamp: Date.now(),
+      });
+      markPaired(peerId);
+      setPairingPhase("success");
+      setPairingCode(null);
+      setPairingError(null);
+      setLastPairedPeerId(peerId);
+      setPeers((prev) => {
+        if (prev.some((p) => p.id === peerId)) return prev;
+        return [
+          ...prev,
+          {
+            id: peerId,
+            name: peerName,
+            avatar: peerAvatar ?? "device",
+            online: true,
+          },
+        ];
+      });
+      void connectToPeer(peerId);
+      toast.success(`Paired with ${peerName}`);
+    },
+    [connectToPeer, markPaired]
+  );
 
   useEffect(() => {
     if (!initialized || !deviceId) return;
@@ -125,7 +203,7 @@ export function usePeerBeam() {
         setPeers(initial);
         initial.forEach((p) => peerNamesRef.current.set(p.id, p.name));
         setReady(true);
-        initial.forEach((p) => void webrtc.connectToPeer(p.id, deviceId > p.id));
+        initial.forEach((p) => connectIfPaired(p.id));
       }),
       signaling.on("peers", (list) => {
         setPeers(list);
@@ -137,7 +215,7 @@ export function usePeerBeam() {
           if (prev.some((p) => p.id === peer.id)) return prev;
           return [...prev, peer];
         });
-        void webrtc.connectToPeer(peer.id, deviceId > peer.id);
+        connectIfPaired(peer.id);
       }),
       signaling.on("peer-left", ({ id }) => {
         setPeers((prev) => prev.filter((p) => p.id !== id));
@@ -145,6 +223,17 @@ export function usePeerBeam() {
       }),
       signaling.on("signal", (payload) => {
         void webrtc.handleSignal(payload);
+      }),
+      signaling.on("pairing-code-ack", ({ code }) => {
+        setPairingCode(code);
+        setPairingPhase("hosting");
+        setPairingError(null);
+      }),
+      signaling.on("pairing-success", handlePairingSuccess),
+      signaling.on("pairing-failed", ({ message }) => {
+        setPairingPhase("error");
+        setPairingError(message);
+        toast.error(message);
       }),
       signaling.on("disconnect", () => setReady(false)),
       signaling.on("connect", () => setReady(true)),
@@ -158,14 +247,77 @@ export function usePeerBeam() {
       webrtc.disconnectAll();
       signaling.disconnect();
     };
-  }, [initialized, deviceId, deviceName, roomId, updateTransfer, appendMessage]);
+  }, [
+    initialized,
+    deviceId,
+    deviceName,
+    roomId,
+    updateTransfer,
+    appendMessage,
+    connectIfPaired,
+    handlePairingSuccess,
+  ]);
 
-  const connectToPeer = useCallback(async (peerId: string) => {
-    await webrtcRef.current?.connectToPeer(peerId, deviceId > peerId);
+  const startPairingHost = useCallback(() => {
+    if (!signalingRef.current?.connected) {
+      toast.error("Not connected to signaling server");
+      return;
+    }
+    const code = generatePairingCode();
+    setPairingCode(code);
+    setPairingPhase("hosting");
+    setPairingError(null);
+    signalingRef.current.emitPairingCode(code, deviceId);
   }, [deviceId]);
+
+  const cancelPairingHost = useCallback(() => {
+    if (pairingCode) {
+      signalingRef.current?.emitPairingCancel(pairingCode, deviceId);
+    }
+    setPairingCode(null);
+    setPairingPhase("idle");
+    setPairingError(null);
+  }, [pairingCode, deviceId]);
+
+  const verifyPairingCode = useCallback(
+    (code: string) => {
+      if (!signalingRef.current?.connected) {
+        toast.error("Not connected to signaling server");
+        return;
+      }
+      setPairingPhase("verifying");
+      setPairingError(null);
+      signalingRef.current.emitPairingVerify(code, deviceId);
+    },
+    [deviceId]
+  );
+
+  const resetPairingUi = useCallback(() => {
+    setPairingPhase("idle");
+    setPairingError(null);
+    setPairingCode(null);
+  }, []);
+
+  const requestConnectToPeer = useCallback(
+    async (peerId: string) => {
+      const name = peerNamesRef.current.get(peerId) ?? "Peer";
+      if (pairedRef.current.has(peerId) || isTrustedPeer(peerId)) {
+        if (!pairedRef.current.has(peerId)) markPaired(peerId);
+        await connectToPeer(peerId);
+        return true;
+      }
+      toast.info(`Pair with ${name} using the 3-digit code below`);
+      return false;
+    },
+    [connectToPeer, markPaired]
+  );
 
   const ensurePeerReady = useCallback(
     async (peerId: string, peerName: string): Promise<boolean> => {
+      if (!pairedRef.current.has(peerId)) {
+        toast.error(`Pair with ${peerName} first`);
+        return false;
+      }
       if (webrtcRef.current?.isConnected(peerId)) return true;
       await connectToPeer(peerId);
       if (webrtcRef.current?.isConnected(peerId)) return true;
@@ -180,36 +332,30 @@ export function usePeerBeam() {
       const list = Array.from(files);
       const targets = targetPeerId
         ? peers.filter((p) => p.id === targetPeerId)
-        : peers;
+        : peers.filter((p) => pairedRef.current.has(p.id));
 
       if (targets.length === 0) {
-        toast.error("No peers online to send files to");
+        toast.error("No paired peers — enter a code or pair first");
         return;
       }
 
       for (const file of list) {
         for (const peer of targets) {
-          if (!webrtcRef.current?.isConnected(peer.id)) {
-            await connectToPeer(peer.id);
-          }
-          if (!webrtcRef.current?.isConnected(peer.id)) {
-            toast.error(`Could not connect to ${peer.name}`);
-            continue;
-          }
+          if (!(await ensurePeerReady(peer.id, peer.name))) continue;
           transferRef.current?.requestSend(file, peer.id, peer.name);
         }
       }
     },
-    [peers, connectToPeer]
+    [peers, ensurePeerReady]
   );
 
   const sendText = useCallback(
     async (content: string, targetPeerId?: string) => {
       const targets = targetPeerId
         ? peers.filter((p) => p.id === targetPeerId)
-        : peers;
+        : peers.filter((p) => pairedRef.current.has(p.id));
       if (targets.length === 0) {
-        toast.error("No peers online");
+        toast.error("No paired peers online");
         return;
       }
 
@@ -247,9 +393,9 @@ export function usePeerBeam() {
       }
       const targets = targetPeerId
         ? peers.filter((p) => p.id === targetPeerId)
-        : peers;
+        : peers.filter((p) => pairedRef.current.has(p.id));
       if (targets.length === 0) {
-        toast.error("No peers online");
+        toast.error("No paired peers online");
         return;
       }
 
@@ -282,21 +428,43 @@ export function usePeerBeam() {
     setNameState(getOrCreateDeviceName());
   }, []);
 
+  const isPairedWith = useCallback(
+    (peerId: string) => pairedPeerIds.has(peerId),
+    [pairedPeerIds]
+  );
+
+  const hasPairedConnection = useMemo(() => {
+    return peers.some(
+      (p) => pairedPeerIds.has(p.id) && connectedPeers.has(p.id)
+    );
+  }, [peers, pairedPeerIds, connectedPeers]);
+
   return {
     peers,
     transfers,
     messages,
     connectedPeers,
+    pairedPeerIds,
+    pairingPhase,
+    pairingCode,
+    pairingError,
+    lastPairedPeerId,
+    hasPairedConnection,
     initialized,
     deviceId,
     deviceName,
     roomId,
     ready: ready && initialized,
-    connectToPeer,
+    connectToPeer: requestConnectToPeer,
+    startPairingHost,
+    cancelPairingHost,
+    verifyPairingCode,
+    resetPairingUi,
     sendFiles,
     sendText,
     sendLink,
     rename,
+    isPairedWith,
     acceptTransfer: (id: string) => void transferRef.current?.acceptIncoming(id),
     rejectTransfer: (id: string) => transferRef.current?.rejectIncoming(id),
     cancelTransfer: (id: string) => transferRef.current?.cancelTransfer(id),

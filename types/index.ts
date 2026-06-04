@@ -86,3 +86,38 @@ export interface PairingPayload {
   deviceId: DeviceId;
   origin: string;
 }
+
+export type PairingPhase = "idle" | "hosting" | "verifying" | "success" | "error";
+
+export interface PairingCodePayload {
+  type: "pairing-code";
+  code: string;
+  from: DeviceId;
+}
+
+export interface PairingVerifyPayload {
+  type: "pairing-verify";
+  code: string;
+  deviceId: DeviceId;
+}
+
+export interface PairingSuccessPayload {
+  type: "pairing-success";
+  sessionId: string;
+  peerId: DeviceId;
+  peerName: string;
+  peerAvatar?: string;
+}
+
+export interface PairingFailedPayload {
+  type: "pairing-failed";
+  message: string;
+  reason?: string;
+}
+
+export interface TrustedPeerRecord {
+  peerId: DeviceId;
+  sessionId: string;
+  peerName?: string;
+  timestamp: number;
+}

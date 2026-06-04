@@ -9,6 +9,7 @@ import { DeviceList } from "@/components/share/device-list";
 import { DropZone } from "@/components/share/drop-zone";
 import { RecipientBar } from "@/components/share/recipient-bar";
 import { ChatPanel } from "@/components/share/chat-panel";
+import { PairingPanel } from "@/components/share/pairing-panel";
 import { TransferDialog } from "@/components/share/transfer-dialog";
 import { TransferPanel } from "@/components/share/transfer-panel";
 import { LoadingScreen } from "@/components/layout/loading-screen";
@@ -25,12 +26,21 @@ function ShareWorkspace({
   deviceId,
   deviceName,
   connectedPeers,
+  pairedPeerIds,
   selectedPeerId,
   onSelectPeer,
   onConnect,
   selectedPeerName,
   otherPeerCount,
   ready,
+  hasPairedConnection,
+  pairingPhase,
+  pairingCode,
+  pairingError,
+  onStartPairingHost,
+  onCancelPairingHost,
+  onVerifyPairingCode,
+  onDismissPairingSuccess,
   transfers,
   onFiles,
   messages,
@@ -44,12 +54,21 @@ function ShareWorkspace({
   deviceId: string;
   deviceName: string;
   connectedPeers: Set<string>;
+  pairedPeerIds: Set<string>;
   selectedPeerId: string | null;
   onSelectPeer: (id: string | null) => void;
   onConnect: (id: string) => void;
   selectedPeerName: string | null;
   otherPeerCount: number;
   ready: boolean;
+  hasPairedConnection: boolean;
+  pairingPhase: Parameters<typeof PairingPanel>[0]["phase"];
+  pairingCode: string | null;
+  pairingError: string | null;
+  onStartPairingHost: () => void;
+  onCancelPairingHost: () => void;
+  onVerifyPairingCode: (code: string) => void;
+  onDismissPairingSuccess: () => void;
   transfers: Parameters<typeof TransferPanel>[0]["transfers"];
   onFiles: (files: FileList | File[]) => void;
   messages: Parameters<typeof ChatPanel>[0]["messages"];
@@ -59,7 +78,8 @@ function ShareWorkspace({
   onRetry: (id: string) => void;
   onClearSelection: () => void;
 }) {
-  const disabled = !ready || otherPeerCount === 0;
+  const shareDisabled = !ready || otherPeerCount === 0 || !hasPairedConnection;
+  const pairingDisabled = !ready;
 
   return (
     <AppShell className="min-h-[calc(100vh-7.5rem)] lg:flex-row">
@@ -68,26 +88,37 @@ function ShareWorkspace({
         localId={deviceId}
         localName={deviceName}
         connectedPeers={connectedPeers}
+        pairedPeerIds={pairedPeerIds}
         selectedPeerId={selectedPeerId}
         onSelectPeer={onSelectPeer}
         onConnect={onConnect}
       />
 
       <section className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <PairingPanel
+          phase={pairingPhase}
+          code={pairingCode}
+          error={pairingError}
+          onStartHost={onStartPairingHost}
+          onCancelHost={onCancelPairingHost}
+          onVerify={onVerifyPairingCode}
+          onDismissSuccess={onDismissPairingSuccess}
+          disabled={pairingDisabled}
+        />
         <RecipientBar
           selectedPeerName={selectedPeerName}
           peerCount={otherPeerCount}
           onClearSelection={onClearSelection}
-          disabled={disabled}
+          disabled={shareDisabled}
         />
-        <DropZone onFiles={onFiles} disabled={disabled} />
+        <DropZone onFiles={onFiles} disabled={shareDisabled} />
         <ChatPanel
           messages={messages}
           localName={deviceName}
           selectedPeerName={selectedPeerName}
           onSendText={onSendText}
           onSendLink={onSendLink}
-          disabled={disabled}
+          disabled={shareDisabled}
         />
       </section>
 
@@ -110,12 +141,22 @@ export function ShareClient() {
     peers,
     transfers,
     connectedPeers,
+    pairedPeerIds,
+    pairingPhase,
+    pairingCode,
+    pairingError,
+    lastPairedPeerId,
+    hasPairedConnection,
     initialized,
     deviceId,
     deviceName,
     roomId,
     ready,
     connectToPeer,
+    startPairingHost,
+    cancelPairingHost,
+    verifyPairingCode,
+    resetPairingUi,
     sendFiles,
     messages,
     sendText,
@@ -131,11 +172,15 @@ export function ShareClient() {
 
   useEffect(() => {
     const pair = searchParams.get("pair");
-    if (pair) {
-      void connectToPeer(pair);
-      setSelectedPeerId(pair);
+    if (pair) setSelectedPeerId(pair);
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (lastPairedPeerId) {
+      setSelectedPeerId(lastPairedPeerId);
+      setMobileTab("share");
     }
-  }, [searchParams, connectToPeer]);
+  }, [lastPairedPeerId]);
 
   const selectedPeer = peers.find((p) => p.id === selectedPeerId);
   const otherPeerCount = peers.filter((p) => p.id !== deviceId).length;
@@ -155,8 +200,8 @@ export function ShareClient() {
         );
         return;
       }
-      void connectToPeer(payload.deviceId);
       setSelectedPeerId(payload.deviceId);
+      void connectToPeer(payload.deviceId);
     },
     [roomId, router, connectToPeer]
   );
@@ -179,12 +224,21 @@ export function ShareClient() {
     deviceId,
     deviceName,
     connectedPeers,
+    pairedPeerIds,
     selectedPeerId,
     onSelectPeer: setSelectedPeerId,
-    onConnect: connectToPeer,
+    onConnect: (id: string) => void connectToPeer(id),
     selectedPeerName: selectedPeer?.name ?? null,
     otherPeerCount,
     ready,
+    hasPairedConnection,
+    pairingPhase,
+    pairingCode,
+    pairingError,
+    onStartPairingHost: startPairingHost,
+    onCancelPairingHost: cancelPairingHost,
+    onVerifyPairingCode: verifyPairingCode,
+    onDismissPairingSuccess: resetPairingUi,
     transfers,
     messages: visibleMessages,
     onFiles: handleFiles,
@@ -229,23 +283,35 @@ export function ShareClient() {
                   localId={deviceId}
                   localName={deviceName}
                   connectedPeers={connectedPeers}
+                  pairedPeerIds={pairedPeerIds}
                   selectedPeerId={selectedPeerId}
                   onSelectPeer={setSelectedPeerId}
-                  onConnect={connectToPeer}
+                  onConnect={(id) => void connectToPeer(id)}
                 />
               </AppShell>
             </TabsContent>
             <TabsContent value="share" className="mt-0">
               <AppShell className="min-h-[calc(100vh-11rem)] flex-col">
+                <PairingPanel
+                  phase={pairingPhase}
+                  code={pairingCode}
+                  error={pairingError}
+                  onStartHost={startPairingHost}
+                  onCancelHost={cancelPairingHost}
+                  onVerify={verifyPairingCode}
+                  onDismissSuccess={resetPairingUi}
+                  disabled={!ready}
+                  className="px-0"
+                />
                 <RecipientBar
                   selectedPeerName={selectedPeer?.name ?? null}
                   peerCount={otherPeerCount}
                   onClearSelection={() => setSelectedPeerId(null)}
-                  disabled={!ready || otherPeerCount === 0}
+                  disabled={!ready || otherPeerCount === 0 || !hasPairedConnection}
                 />
                 <DropZone
                   onFiles={handleFiles}
-                  disabled={!ready || otherPeerCount === 0}
+                  disabled={!ready || otherPeerCount === 0 || !hasPairedConnection}
                 />
                 <ChatPanel
                   messages={visibleMessages}
@@ -253,7 +319,7 @@ export function ShareClient() {
                   selectedPeerName={selectedPeer?.name ?? null}
                   onSendText={(t) => sendText(t, selectedPeerId ?? undefined)}
                   onSendLink={(u) => sendLink(u, selectedPeerId ?? undefined)}
-                  disabled={!ready || otherPeerCount === 0}
+                  disabled={!ready || otherPeerCount === 0 || !hasPairedConnection}
                 />
               </AppShell>
             </TabsContent>

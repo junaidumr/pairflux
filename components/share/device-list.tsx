@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Radio, Users, WifiOff } from "lucide-react";
+import { Check, Lock, ShieldCheck, Users, WifiOff } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
@@ -13,6 +13,7 @@ interface DeviceListProps {
   localId: string;
   localName: string;
   connectedPeers: Set<string>;
+  pairedPeerIds: Set<string>;
   selectedPeerId: string | null;
   onSelectPeer: (id: string | null) => void;
   onConnect: (id: string) => void;
@@ -24,6 +25,7 @@ export function DeviceList({
   localId,
   localName,
   connectedPeers,
+  pairedPeerIds,
   selectedPeerId,
   onSelectPeer,
   onConnect,
@@ -90,14 +92,16 @@ export function DeviceList({
             </p>
             {others.map((peer) => {
               const connected = connectedPeers.has(peer.id);
+              const paired = pairedPeerIds.has(peer.id);
               const selected = selectedPeerId === peer.id;
               return (
                 <li key={peer.id}>
                   <button
                     type="button"
                     onClick={() => {
-                      onSelectPeer(selected ? null : peer.id);
-                      if (!connected) onConnect(peer.id);
+                      const next = selected ? null : peer.id;
+                      onSelectPeer(next);
+                      if (next && paired && !connected) void onConnect(peer.id);
                     }}
                     className={cn(
                       "group flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left transition-all",
@@ -133,16 +137,28 @@ export function DeviceList({
                           selected ? "text-primary-foreground/80" : "text-muted-foreground"
                         )}
                       >
-                        {connected ? "Ready" : "Connecting…"}
+                        {connected
+                          ? "Ready"
+                          : paired
+                            ? "Connecting…"
+                            : "Needs pairing code"}
                       </p>
                     </div>
-                    <Radio
-                      className={cn(
-                        "h-4 w-4 shrink-0 opacity-0 transition-opacity group-hover:opacity-50",
-                        selected && "opacity-100",
-                        selected ? "text-primary-foreground" : "text-primary"
-                      )}
-                    />
+                    {paired ? (
+                      <ShieldCheck
+                        className={cn(
+                          "h-4 w-4 shrink-0",
+                          selected ? "text-primary-foreground" : "text-emerald-500"
+                        )}
+                      />
+                    ) : (
+                      <Lock
+                        className={cn(
+                          "h-4 w-4 shrink-0 opacity-50",
+                          selected ? "text-primary-foreground" : "text-muted-foreground"
+                        )}
+                      />
+                    )}
                   </button>
                 </li>
               );
