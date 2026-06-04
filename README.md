@@ -1,36 +1,116 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# peer-beam
 
-## Getting Started
+Production-ready, browser-to-browser file sharing inspired by PairDrop and Snapdrop. No accounts, no database, no file storage on the server — only WebRTC data channels for transfers and Socket.io for signaling.
 
-First, run the development server:
+## Features
+
+- Real-time peer discovery (Socket.io)
+- WebRTC P2P connections with STUN/TURN support
+- Chunked file transfer (32KB) with ACK, backpressure, cancel/retry
+- Drag & drop, multi-file, and folder sharing
+- Text, link, and clipboard sharing
+- QR code pair / scan
+- Dark & light themes (shadcn/ui)
+- Rate-limited signaling server
+
+## Quick start
+
+### Prerequisites
+
+- Node.js 20+
+- Two browsers (or devices) on the same network for local testing
+
+### 1. Install
+
+```bash
+npm install
+cp .env.example .env.local
+```
+
+### 2. Run (frontend + signaling)
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+- Web app: [http://localhost:3000](http://localhost:3000)
+- Signaling: [http://localhost:3001](http://localhost:3001)
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### 3. Share files
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. Open [http://localhost:3000](http://localhost:3000) and click **Start Sharing**.
+2. Open the same URL on another device (same room — default `public`, or use `?room=myroom`).
+3. Select a peer (optional) and drop files, or send to all connected peers.
+4. Accept incoming transfers in the dialog.
 
-## Learn More
+### Custom room
 
-To learn more about Next.js, take a look at the following resources:
+```
+http://localhost:3000/share?room=office-42
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### QR pairing
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Use **QR Pair** in the app header to show or scan a code that encodes room + device.
 
-## Deploy on Vercel
+## Environment variables
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+| Variable | Description |
+|----------|-------------|
+| `NEXT_PUBLIC_SIGNALING_URL` | Socket.io server URL |
+| `NEXT_PUBLIC_STUN_SERVERS` | Comma-separated STUN URLs |
+| `NEXT_PUBLIC_TURN_*` | Optional TURN credentials |
+| `PORT` | Signaling server port (default 3001) |
+| `CORS_ORIGIN` | Allowed frontend origin(s) |
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Production
+
+### Build
+
+```bash
+npm run build
+npm run start
+```
+
+### Docker
+
+```bash
+docker compose up --build
+```
+
+With Nginx reverse proxy:
+
+```bash
+docker compose --profile production up --build
+```
+
+Set `NEXT_PUBLIC_SIGNALING_URL` to your public signaling URL (e.g. `https://your-domain.com` if proxied under `/socket.io/`).
+
+## Architecture
+
+```
+Browser A ←—— WebRTC DataChannel (files) ——→ Browser B
+     │                                           │
+     └──────── Socket.io (signaling only) ───────┘
+                         │
+                  Express server
+```
+
+- **Signaling**: peer list, offers, answers, ICE candidates
+- **Transfer**: chunked binary over `RTCDataChannel` with JSON control messages
+
+## Project structure
+
+```
+app/           Next.js routes (landing + /share)
+components/    UI (shadcn) + share panels
+hooks/         usePeerBeam orchestration
+lib/           WebRTC, transfer engine, protocol
+server/        Express + Socket.io signaling
+types/         Shared TypeScript types
+```
+
+## License
+
+MIT
+# peer-beam
