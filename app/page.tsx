@@ -1,102 +1,110 @@
-import Image from "next/image";
+import { ArrowRight, Lock, Shield, Wifi, Zap } from "lucide-react";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
-export default function Home() {
+const steps = [
+  {
+    title: "Open peer-beam",
+    description: "No signup. Open the site on any device on the same room.",
+    icon: Zap,
+  },
+  {
+    title: "Discover peers",
+    description: "Nearby browsers appear instantly via secure signaling.",
+    icon: Wifi,
+  },
+  {
+    title: "Send directly",
+    description: "Files travel browser-to-browser over encrypted WebRTC channels.",
+    icon: Shield,
+  },
+];
+
+export default function LandingPage() {
   return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
-
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+    <div className="min-h-screen bg-gradient-to-b from-background via-background to-primary/5">
+      <header className="mx-auto flex h-16 max-w-5xl items-center justify-between px-6">
+        <div className="flex items-center gap-2 font-semibold">
+          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+            <Zap className="h-5 w-5" />
+          </span>
+          peer-beam
         </div>
+        <Button asChild variant="ghost" size="sm">
+          <Link href="/share">Start Sharing</Link>
+        </Button>
+      </header>
+
+      <main>
+        <section className="mx-auto max-w-5xl px-6 pb-24 pt-16 text-center md:pt-24">
+          <p className="mb-4 inline-flex items-center rounded-full border bg-muted/50 px-3 py-1 text-xs font-medium text-muted-foreground">
+            Pure P2P · No accounts · No server storage
+          </p>
+          <h1 className="text-4xl font-bold tracking-tight md:text-6xl">
+            Share files instantly,
+            <br />
+            <span className="bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">
+              browser to browser
+            </span>
+          </h1>
+          <p className="mx-auto mt-6 max-w-2xl text-lg text-muted-foreground">
+            peer-beam is a modern AirDrop-style experience for the web. Drop files,
+            text, or links to nearby devices with end-to-end WebRTC — nothing touches
+            our servers.
+          </p>
+          <div className="mt-10 flex flex-wrap items-center justify-center gap-4">
+            <Button asChild size="lg" className="h-12 px-8 text-base">
+              <Link href="/share">
+                Start Sharing
+                <ArrowRight className="ml-2 h-5 w-5" />
+              </Link>
+            </Button>
+          </div>
+        </section>
+
+        <section className="mx-auto max-w-5xl px-6 pb-24">
+          <h2 className="mb-8 text-center text-2xl font-semibold">How it works</h2>
+          <div className="grid gap-6 md:grid-cols-3">
+            {steps.map((step) => (
+              <Card key={step.title} className="border-border/60 bg-card/80">
+                <CardHeader>
+                  <step.icon className="mb-2 h-8 w-8 text-primary" />
+                  <CardTitle className="text-lg">{step.title}</CardTitle>
+                  <CardDescription>{step.description}</CardDescription>
+                </CardHeader>
+              </Card>
+            ))}
+          </div>
+        </section>
+
+        <section className="mx-auto max-w-5xl px-6 pb-24">
+          <Card className="border-primary/20 bg-card/80">
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <Lock className="h-5 w-5 text-primary" />
+                <CardTitle>Security by design</CardTitle>
+              </div>
+              <CardDescription className="text-base leading-relaxed">
+                Files never upload to our infrastructure. Socket.io handles discovery and
+                WebRTC handshake only. Transfers use encrypted data channels with chunked,
+                acknowledged delivery and optional TURN for restrictive networks.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ul className="grid gap-2 text-sm text-muted-foreground sm:grid-cols-2">
+                <li>· DTLS-SRTP / SCTP encryption (WebRTC native)</li>
+                <li>· Temporary session IDs, no accounts</li>
+                <li>· Rate-limited signaling server</li>
+                <li>· Auto-expire inactive peers</li>
+              </ul>
+            </CardContent>
+          </Card>
+        </section>
       </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
+
+      <footer className="border-t py-8 text-center text-sm text-muted-foreground">
+        peer-beam · Open-source P2P file sharing
       </footer>
     </div>
   );
