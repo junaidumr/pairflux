@@ -11,7 +11,6 @@ import {
   setDeviceName,
 } from "@/lib/device";
 import { generatePairingCode } from "@/lib/pairing-code";
-import { isSignalingUrlConfigured } from "@/lib/constants";
 import { SignalingClient } from "@/lib/signaling";
 import {
   addTrustedPeer,
@@ -197,7 +196,7 @@ export function usePairflux() {
     );
 
     const avatar = getAvatarColor(deviceId);
-    signaling.connect(deviceId, deviceName, avatar, roomId);
+    const signalingConfigured = signaling.connect(deviceId, deviceName, avatar, roomId);
 
     const unsubs = [
       signaling.on("joined", ({ peers: initial }) => {
@@ -243,10 +242,10 @@ export function usePairflux() {
       }),
     ];
 
-    if (!isSignalingUrlConfigured()) {
+    if (!signalingConfigured) {
       toast.error(
-        "Signaling server not configured. Set NEXT_PUBLIC_SIGNALING_URL in Vercel to your deployed signaling URL.",
-        { duration: 12_000 }
+        "Signaling server not configured. Deploy server/index.ts, then set NEXT_PUBLIC_SIGNALING_URL in Vercel and redeploy.",
+        { id: "signaling-error", duration: 12_000 }
       );
     }
 

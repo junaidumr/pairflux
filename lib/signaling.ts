@@ -37,19 +37,18 @@ export class SignalingClient {
     name: string,
     avatar: string,
     room: string
-  ): void {
-    if (this.socket?.connected) return;
-
-    const url = getSignalingUrl();
+  ): boolean {
+    if (this.socket?.connected) return true;
     if (!isSignalingUrlConfigured()) {
       console.error(
-        "[signaling] NEXT_PUBLIC_SIGNALING_URL is not set. Deploy the signaling server " +
-          "(server/index.ts) to Railway/Render/Fly.io and set the env var in Vercel. " +
-          `Attempting fallback: ${url}`
+        "[signaling] NEXT_PUBLIC_SIGNALING_URL is not set. Deploy server/index.ts " +
+          "to Railway/Render/Fly.io, then set the env var in Vercel and redeploy."
       );
-    } else {
-      console.log("[signaling] Connecting to", url, "room:", room);
+      return false;
     }
+
+    const url = getSignalingUrl();
+    console.log("[signaling] Connecting to", url, "room:", room);
 
     this.socket = io(url, {
       path: SIGNALING_PATH,
@@ -101,6 +100,8 @@ export class SignalingClient {
       console.error("[signaling] Connection error:", err.message, "url:", url);
       this.emit("connect-error", { message: err.message });
     });
+
+    return true;
   }
 
   on<K extends keyof SignalingEvents>(event: K, handler: SignalingEvents[K]): () => void {
