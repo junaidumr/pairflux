@@ -10,6 +10,7 @@ interface ShareAppLinkProps {
   children: React.ReactNode;
   variant?: React.ComponentProps<typeof Button>["variant"];
   size?: React.ComponentProps<typeof Button>["size"];
+  onClick?: () => void;
 }
 
 /** Client navigation to /share — scroll reset handled globally on route change. */
@@ -19,6 +20,7 @@ export function ShareAppLink({
   children,
   variant,
   size,
+  onClick,
 }: ShareAppLinkProps) {
   const router = useRouter();
 
@@ -28,7 +30,10 @@ export function ShareAppLink({
       variant={variant}
       size={size}
       className={cn(className)}
-      onClick={() => router.push(href)}
+      onClick={() => {
+        onClick?.();
+        router.push(href);
+      }}
     >
       {children}
     </Button>

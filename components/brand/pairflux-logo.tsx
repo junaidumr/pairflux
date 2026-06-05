@@ -35,7 +35,7 @@ export function PairfluxLogo({
       </span>
       {showText && (
         <span className={cn("font-semibold tracking-tight", s.text)}>
-          Pair<span className="text-primary">flux</span>
+          Peer<span className="text-primary">Beam</span>
         </span>
       )}
     </span>

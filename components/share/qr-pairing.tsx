@@ -140,7 +140,7 @@ export function QrPairing({ roomId, deviceId, onPair }: QrPairingProps) {
           <DialogContent className="rounded-2xl sm:max-w-lg">
             <DialogHeader>
               <DialogTitle>Scan QR code</DialogTitle>
-              <DialogDescription>Point your camera at another Pairflux QR</DialogDescription>
+              <DialogDescription>Point your camera at another PeerBeam QR</DialogDescription>
             </DialogHeader>
             <div
               id={scanRegionId}
