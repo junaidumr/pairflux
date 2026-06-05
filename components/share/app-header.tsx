@@ -55,7 +55,7 @@ export function AppHeader({
                 : "bg-amber-500/15 text-amber-600"
             )}
           >
-            {ready ? "Live" : "…"}
+            {ready ? "Live" : "Offline"}
           </Badge>
         </button>
 

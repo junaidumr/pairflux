@@ -11,6 +11,7 @@ import {
   setDeviceName,
 } from "@/lib/device";
 import { generatePairingCode } from "@/lib/pairing-code";
+import { isSignalingUrlConfigured } from "@/lib/constants";
 import { SignalingClient } from "@/lib/signaling";
 import {
   addTrustedPeer,
@@ -237,7 +238,17 @@ export function usePairflux() {
       }),
       signaling.on("disconnect", () => setReady(false)),
       signaling.on("connect", () => setReady(true)),
+      signaling.on("connect-error", ({ message }) => {
+        toast.error(`Cannot reach signaling server: ${message}`, { id: "signaling-error" });
+      }),
     ];
+
+    if (!isSignalingUrlConfigured()) {
+      toast.error(
+        "Signaling server not configured. Set NEXT_PUBLIC_SIGNALING_URL in Vercel to your deployed signaling URL.",
+        { duration: 12_000 }
+      );
+    }
 
     const heartbeat = setInterval(() => signaling.heartbeat(), 15000);
 

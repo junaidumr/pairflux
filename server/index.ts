@@ -6,7 +6,20 @@ import { Server, Socket } from "socket.io";
 import { PairingStore } from "./pairing-store";
 
 const PORT = Number(process.env.PORT ?? 3001);
-const CORS_ORIGIN = process.env.CORS_ORIGIN ?? "http://localhost:3000";
+const HOST = process.env.HOST ?? "0.0.0.0";
+
+function parseCorsOrigins(): string[] {
+  const raw =
+    process.env.CORS_ORIGIN ??
+    process.env.FRONTEND_URL ??
+    "http://localhost:3000,http://127.0.0.1:3000";
+  return raw
+    .split(",")
+    .map((o) => o.trim())
+    .filter(Boolean);
+}
+
+const CORS_ORIGINS = parseCorsOrigins();
 
 interface PeerMeta {
   id: string;
@@ -19,7 +32,7 @@ interface PeerMeta {
 const app = express();
 app.use(
   cors({
-    origin: CORS_ORIGIN.split(",").map((o) => o.trim()),
+    origin: CORS_ORIGINS,
     credentials: true,
   })
 );
@@ -32,8 +45,9 @@ app.get("/health", (_req, res) => {
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: CORS_ORIGIN.split(",").map((o) => o.trim()),
+    origin: CORS_ORIGINS,
     methods: ["GET", "POST"],
+    credentials: true,
   },
   maxHttpBufferSize: 1e6,
   pingTimeout: 20000,
@@ -100,6 +114,7 @@ function sanitizeName(name: unknown): string {
 }
 
 io.on("connection", (socket: Socket) => {
+  console.log("[signaling] Socket connected:", socket.id);
   let peerId: string | null = null;
   let room: string | null = null;
 
@@ -122,7 +137,9 @@ io.on("connection", (socket: Socket) => {
     });
 
     socket.join(r);
-    socket.emit("joined", { id, room: r, peers: roomPeers(r, id) });
+    const existing = roomPeers(r, id);
+    console.log("[signaling] Peer registered:", { id, room: r, socketId: socket.id, existingPeers: existing.length });
+    socket.emit("joined", { id, room: r, peers: existing });
     io.to(r).emit("peer-joined", {
       id,
       name: sanitizeName(payload?.name),
@@ -256,9 +273,10 @@ io.on("connection", (socket: Socket) => {
     pairingStore.cancel(meta.room, meta.id, code);
   });
 
-  socket.on("disconnect", () => {
+  socket.on("disconnect", (reason) => {
     const meta = peers.get(socket.id);
     if (meta && room) {
+      console.log("[signaling] Socket disconnected:", socket.id, meta.id, reason);
       peers.delete(socket.id);
       io.to(meta.room).emit("peer-left", { id: meta.id });
       broadcastPeers(meta.room);
@@ -282,6 +300,7 @@ setInterval(() => {
   for (const r of rooms) broadcastPeers(r);
 }, 30_000);
 
-httpServer.listen(PORT, () => {
-  console.log(`pairflux signaling on :${PORT}`);
+httpServer.listen(PORT, HOST, () => {
+  console.log(`pairflux signaling on ${HOST}:${PORT}`);
+  console.log(`[signaling] CORS origins: ${CORS_ORIGINS.join(", ")}`);
 });

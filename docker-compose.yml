@@ -6,7 +6,7 @@ services:
       - "3001:3001"
     environment:
       - PORT=3001
-      - CORS_ORIGIN=http://localhost:3000
+      - CORS_ORIGIN=http://localhost:3000,http://127.0.0.1:3000
       - NEXT_PUBLIC_SIGNALING_URL=http://localhost:3001
     restart: unless-stopped
 

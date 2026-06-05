@@ -1,7 +1,11 @@
 "use client";
 
 import { io, Socket } from "socket.io-client";
-import { getSignalingUrl, SIGNALING_PATH } from "@/lib/constants";
+import {
+  getSignalingUrl,
+  isSignalingUrlConfigured,
+  SIGNALING_PATH,
+} from "@/lib/constants";
 import type {
   PairingFailedPayload,
   PairingSuccessPayload,
@@ -18,6 +22,7 @@ export type SignalingEvents = {
   error: (payload: { message: string }) => void;
   connect: () => void;
   disconnect: () => void;
+  "connect-error": (payload: { message: string }) => void;
   "pairing-code-ack": (payload: { type: "pairing-code-ack"; code: string; from: string }) => void;
   "pairing-success": (payload: PairingSuccessPayload) => void;
   "pairing-failed": (payload: PairingFailedPayload) => void;
@@ -35,16 +40,38 @@ export class SignalingClient {
   ): void {
     if (this.socket?.connected) return;
 
-    this.socket = io(getSignalingUrl(), {
+    const url = getSignalingUrl();
+    if (!isSignalingUrlConfigured()) {
+      console.error(
+        "[signaling] NEXT_PUBLIC_SIGNALING_URL is not set. Deploy the signaling server " +
+          "(server/index.ts) to Railway/Render/Fly.io and set the env var in Vercel. " +
+          `Attempting fallback: ${url}`
+      );
+    } else {
+      console.log("[signaling] Connecting to", url, "room:", room);
+    }
+
+    this.socket = io(url, {
       path: SIGNALING_PATH,
       transports: ["websocket", "polling"],
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
+      withCredentials: true,
     });
 
     const bind = <K extends keyof SignalingEvents>(event: K) => {
       this.socket?.on(event as string, (...args: unknown[]) => {
+        if (event === "joined") {
+          const payload = args[0] as { room: string; peers: unknown[] };
+          console.log("[signaling] Peer registered in room:", payload.room, "peers:", payload.peers.length);
+        } else if (event === "peer-joined") {
+          console.log("[signaling] Peer discovered:", args[0]);
+        } else if (event === "peer-left") {
+          console.log("[signaling] Peer left:", args[0]);
+        } else if (event === "pairing-success") {
+          console.log("[signaling] Pairing success:", args[0]);
+        }
         this.emit(event, ...(args as Parameters<SignalingEvents[K]>));
       });
     };
@@ -62,7 +89,17 @@ export class SignalingClient {
     bind("pairing-failed");
 
     this.socket.on("connect", () => {
+      console.log("[signaling] Socket connected:", this.socket?.id);
       this.socket?.emit("join", { id: deviceId, name, avatar, room });
+    });
+
+    this.socket.on("disconnect", (reason) => {
+      console.log("[signaling] Socket disconnected:", reason);
+    });
+
+    this.socket.on("connect_error", (err) => {
+      console.error("[signaling] Connection error:", err.message, "url:", url);
+      this.emit("connect-error", { message: err.message });
     });
   }
 
@@ -86,10 +123,12 @@ export class SignalingClient {
   }
 
   emitPairingCode(code: string, from: string): void {
+    console.log("[signaling] Pairing request sent:", { code, from });
     this.socket?.emit("pairing-code", { type: "pairing-code", code, from });
   }
 
   emitPairingVerify(code: string, deviceId: string): void {
+    console.log("[signaling] Pairing verify sent:", { code, deviceId });
     this.socket?.emit("pairing-verify", { type: "pairing-verify", code, deviceId });
   }
 

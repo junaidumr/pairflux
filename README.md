@@ -64,7 +64,8 @@ Use **QR Pair** in the app header to show or scan a code that encodes room + dev
 
 | Variable | Description |
 |----------|-------------|
-| `NEXT_PUBLIC_SIGNALING_URL` | Socket.io server URL |
+| `NEXT_PUBLIC_SIGNALING_URL` | Socket.io server URL (required on Vercel) |
+| `NEXT_PUBLIC_SOCKET_URL` | Alias for `NEXT_PUBLIC_SIGNALING_URL` |
 | `NEXT_PUBLIC_STUN_SERVERS` | Comma-separated STUN URLs |
 | `NEXT_PUBLIC_TURN_*` | Optional TURN credentials |
 | `PORT` | Signaling server port (default 3001) |
@@ -72,26 +73,69 @@ Use **QR Pair** in the app header to show or scan a code that encodes room + dev
 
 ## Production
 
-### Build
+PeerBeam needs **two deployments**:
+
+| Component | Where | Why |
+|-----------|-------|-----|
+| Next.js frontend | **Vercel** | Static/SSR app |
+| Socket.io signaling (`server/index.ts`) | **Railway, Render, Fly.io, or VPS** | Long-lived WebSocket server |
+
+**Socket.io cannot run on Vercel.** Vercel Functions are stateless, short-lived, and do not support persistent WebSocket rooms. Without a separate signaling server, production clients cannot discover peers or exchange WebRTC offers.
+
+### 1. Deploy signaling server
+
+**Render** (easiest):
+
+1. Push this repo to GitHub.
+2. Render → New → Blueprint → connect repo (`render.yaml` is included).
+3. Set `CORS_ORIGIN` to `https://peer-beam-eta.vercel.app,http://localhost:3000`.
+4. Copy the public URL (e.g. `https://pairflux-signaling.onrender.com`).
+
+**Railway / Docker / VPS:**
 
 ```bash
-npm run build
-npm run start
+# Docker (signaling only)
+docker build -f Dockerfile.signaling -t pairflux-signaling .
+docker run -p 3001:3001 \
+  -e CORS_ORIGIN=https://peer-beam-eta.vercel.app,http://localhost:3000 \
+  pairflux-signaling
+
+# Or directly
+PORT=3001 CORS_ORIGIN=https://peer-beam-eta.vercel.app npm run start:signal
 ```
 
-### Docker
+Verify: `curl https://YOUR-SIGNALING-URL/health` → `{"ok":true,"service":"pairflux-signaling"}`
+
+### 2. Configure Vercel (frontend)
+
+In Vercel → Project → Settings → Environment Variables:
+
+| Variable | Production value |
+|----------|------------------|
+| `NEXT_PUBLIC_SIGNALING_URL` | `https://YOUR-SIGNALING-URL` (no trailing slash) |
+
+Redeploy after saving. Open DevTools → Console on `/share` — you should see `[signaling] Socket connected: <id>`.
+
+### 3. All-in-one Docker (self-hosted)
 
 ```bash
 docker compose up --build
 ```
 
-With Nginx reverse proxy:
+With Nginx reverse proxy (frontend + signaling on one domain):
 
 ```bash
 docker compose --profile production up --build
 ```
 
-Set `NEXT_PUBLIC_SIGNALING_URL` to your public signaling URL (e.g. `https://your-domain.com` if proxied under `/socket.io/`).
+Set `NEXT_PUBLIC_SIGNALING_URL` to your public origin if proxied under `/socket.io/`.
+
+### Troubleshooting production
+
+- Header shows **Offline** → signaling URL wrong or server not running.
+- Console: `Connection error` → check `CORS_ORIGIN` includes your exact Vercel URL (scheme + host).
+- Peers not visible → both devices must use the same `?room=` (default `public`).
+- WebRTC fails after pairing → add a TURN server (`NEXT_PUBLIC_TURN_*`) for strict NAT/firewalls.
 
 ## Architecture
 

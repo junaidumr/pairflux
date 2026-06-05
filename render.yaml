@@ -1,0 +1,21 @@
+# Deploy the signaling server on Render (free tier works for testing).
+# Frontend stays on Vercel — set NEXT_PUBLIC_SIGNALING_URL to this service's URL.
+services:
+  - type: web
+    name: pairflux-signaling
+    runtime: node
+    plan: free
+    buildCommand: npm ci
+    startCommand: npm run start:signal
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: HOST
+        value: 0.0.0.0
+      - key: CORS_ORIGIN
+        sync: false
+        # Set in Render dashboard, e.g.:
+        # https://peer-beam-eta.vercel.app,http://localhost:3000

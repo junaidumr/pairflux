@@ -64,12 +64,46 @@ export function getStunServers(): RTCIceServer[] {
   return servers;
 }
 
+/** Resolved at build time in the browser bundle (NEXT_PUBLIC_*). */
+function signalingUrlFromEnv(): string | undefined {
+  const raw =
+    process.env.NEXT_PUBLIC_SIGNALING_URL ??
+    process.env.NEXT_PUBLIC_SOCKET_URL;
+  if (!raw) return undefined;
+  return raw.replace(/\/$/, "");
+}
+
+export function isLocalDevHost(hostname: string): boolean {
+  return (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "[::1]" ||
+    hostname.endsWith(".local")
+  );
+}
+
+/**
+ * Socket.io server origin (no path). Must be set in production via
+ * NEXT_PUBLIC_SIGNALING_URL when the frontend is hosted separately (e.g. Vercel).
+ */
 export function getSignalingUrl(): string {
+  const fromEnv = signalingUrlFromEnv();
+  if (fromEnv) return fromEnv;
+
   if (typeof window !== "undefined") {
-    return (
-      process.env.NEXT_PUBLIC_SIGNALING_URL ??
-      `${window.location.protocol}//${window.location.hostname}:3001`
-    );
+    const { hostname, protocol, origin } = window.location;
+    if (isLocalDevHost(hostname)) {
+      return `${protocol}//${hostname}:3001`;
+    }
+    // Same-host reverse proxy (nginx /socket.io → signaling). Not available on Vercel alone.
+    return origin;
   }
-  return process.env.NEXT_PUBLIC_SIGNALING_URL ?? "http://localhost:3001";
+
+  return "http://localhost:3001";
+}
+
+export function isSignalingUrlConfigured(): boolean {
+  if (signalingUrlFromEnv()) return true;
+  if (typeof window === "undefined") return false;
+  return isLocalDevHost(window.location.hostname);
 }
