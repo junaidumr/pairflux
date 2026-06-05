@@ -2,7 +2,7 @@
 
 import { Copy, Hash } from "lucide-react";
 import { toast } from "sonner";
-import { PeerBeamLogo } from "@/components/brand/peer-beam-logo";
+import { PairfluxLogo } from "@/components/brand/pairflux-logo";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { QrPairing } from "@/components/share/qr-pairing";
 import { Badge } from "@/components/ui/badge";
@@ -36,7 +36,7 @@ export function AppHeader({
   return (
     <header className="sticky top-0 z-50 border-b border-border/40 bg-background/75 backdrop-blur-2xl">
       <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-3 px-4">
-        <PeerBeamLogo href="/" size="sm" />
+        <PairfluxLogo href="/" size="sm" />
 
         <button
           type="button"

@@ -8,7 +8,7 @@ export default function SharePage() {
     <Suspense
       fallback={
         <div className="flex min-h-screen items-center justify-center text-muted-foreground">
-          Loading peer-beam…
+          Loading Pairflux…
         </div>
       }
     >

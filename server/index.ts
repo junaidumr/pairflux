@@ -26,7 +26,7 @@ app.use(
 app.use(express.json({ limit: "16kb" }));
 
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, service: "peer-beam-signaling" });
+  res.json({ ok: true, service: "pairflux-signaling" });
 });
 
 const httpServer = createServer(app);
@@ -283,5 +283,5 @@ setInterval(() => {
 }, 30_000);
 
 httpServer.listen(PORT, () => {
-  console.log(`peer-beam signaling on :${PORT}`);
+  console.log(`pairflux signaling on :${PORT}`);
 });

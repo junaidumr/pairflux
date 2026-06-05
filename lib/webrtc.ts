@@ -147,7 +147,7 @@ export class WebRTCManager {
 
     const state = this.createPeerConnection(peerId, polite);
     if (!state.channel) {
-      const channel = state.pc.createDataChannel("peer-beam", {
+      const channel = state.pc.createDataChannel("pairflux", {
         ordered: true,
         maxRetransmits: 30,
       });
@@ -187,7 +187,7 @@ export class WebRTCManager {
     if (!state) {
       state = this.createPeerConnection(from, polite);
       if (!polite) {
-        const channel = state.pc.createDataChannel("peer-beam", {
+        const channel = state.pc.createDataChannel("pairflux", {
           ordered: true,
           maxRetransmits: 30,
         });

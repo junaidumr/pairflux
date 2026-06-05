@@ -1,8 +1,10 @@
 import { ADJECTIVES, ANIMALS, AVATAR_COLORS } from "@/lib/constants";
 import type { DeviceId } from "@/types";
 
-const DEVICE_KEY = "peer-beam-device-id";
-const NAME_KEY = "peer-beam-device-name";
+const DEVICE_KEY = "pairflux-device-id";
+const NAME_KEY = "pairflux-device-name";
+const LEGACY_DEVICE_KEY = "peer-beam-device-id";
+const LEGACY_NAME_KEY = "peer-beam-device-name";
 
 function randomItem<T>(arr: readonly T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
@@ -21,9 +23,17 @@ export function getAvatarColor(id: DeviceId): string {
   return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
 }
 
+function migrateStorageKey(key: string, legacyKey: string): string | null {
+  const value = localStorage.getItem(key) ?? localStorage.getItem(legacyKey);
+  if (value && !localStorage.getItem(key)) {
+    localStorage.setItem(key, value);
+  }
+  return value;
+}
+
 export function getOrCreateDeviceId(): DeviceId {
   if (typeof window === "undefined") return "server";
-  let id = localStorage.getItem(DEVICE_KEY);
+  let id = migrateStorageKey(DEVICE_KEY, LEGACY_DEVICE_KEY);
   if (!id) {
     id = crypto.randomUUID();
     localStorage.setItem(DEVICE_KEY, id);
@@ -33,7 +43,7 @@ export function getOrCreateDeviceId(): DeviceId {
 
 export function getOrCreateDeviceName(): string {
   if (typeof window === "undefined") return "Peer";
-  let name = localStorage.getItem(NAME_KEY);
+  let name = migrateStorageKey(NAME_KEY, LEGACY_NAME_KEY);
   if (!name) {
     name = generateDeviceName();
     localStorage.setItem(NAME_KEY, name);

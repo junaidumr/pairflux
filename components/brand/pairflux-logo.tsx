@@ -2,7 +2,7 @@ import { Radio } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 
-interface PeerBeamLogoProps {
+interface PairfluxLogoProps {
   href?: string;
   className?: string;
   showText?: boolean;
@@ -15,12 +15,12 @@ const sizes = {
   lg: { icon: "h-11 w-11", iconInner: "h-5 w-5", text: "text-lg" },
 };
 
-export function PeerBeamLogo({
+export function PairfluxLogo({
   href = "/",
   className,
   showText = true,
   size = "md",
-}: PeerBeamLogoProps) {
+}: PairfluxLogoProps) {
   const s = sizes[size];
   const content = (
     <span className={cn("group inline-flex items-center gap-2.5", className)}>
@@ -35,7 +35,7 @@ export function PeerBeamLogo({
       </span>
       {showText && (
         <span className={cn("font-semibold tracking-tight", s.text)}>
-          peer<span className="text-primary">-beam</span>
+          Pair<span className="text-primary">flux</span>
         </span>
       )}
     </span>

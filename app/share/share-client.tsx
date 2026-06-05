@@ -15,7 +15,7 @@ import { TransferPanel } from "@/components/share/transfer-panel";
 import { LoadingScreen } from "@/components/layout/loading-screen";
 import { MeshBackground } from "@/components/layout/mesh-background";
 import { filterMessagesForPeer } from "@/lib/chat";
-import { usePeerBeam } from "@/hooks/use-peer-beam";
+import { usePairflux } from "@/hooks/use-pairflux";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { PairingPayload } from "@/types";
 
@@ -166,7 +166,7 @@ export function ShareClient() {
     rejectTransfer,
     cancelTransfer,
     retryTransfer,
-  } = usePeerBeam();
+  } = usePairflux();
 
   const [selectedPeerId, setSelectedPeerId] = useState<string | null>(null);
 

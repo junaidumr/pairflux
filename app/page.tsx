@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { StartSharingLink } from "@/components/landing/start-sharing-link";
-import { PeerBeamLogo } from "@/components/brand/peer-beam-logo";
+import { PairfluxLogo } from "@/components/brand/pairflux-logo";
 import { MeshBackground } from "@/components/layout/mesh-background";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { Button } from "@/components/ui/button";
@@ -51,7 +51,7 @@ export default function LandingPage() {
 
       <header className="sticky top-0 z-50 border-b border-border/50 bg-background/70 backdrop-blur-2xl">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
-          <PeerBeamLogo size="md" />
+          <PairfluxLogo size="md" />
           <nav className="flex items-center gap-2">
             <ThemeToggle />
             <Button asChild className="rounded-xl px-5 shadow-lg shadow-primary/20">
@@ -76,7 +76,7 @@ export default function LandingPage() {
               <span className="text-gradient">like AirDrop for the web</span>
             </h1>
             <p className="mx-auto mt-6 max-w-xl text-lg leading-relaxed text-muted-foreground">
-              peer-beam connects browsers directly with WebRTC. Drop files, text, or links—
+              Pairflux connects browsers directly with WebRTC. Drop files, text, or links—
               fast, private, and free.
             </p>
             <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
@@ -138,7 +138,7 @@ export default function LandingPage() {
               <Button asChild size="lg" className="shrink-0 rounded-xl">
                 <Link href="/share">
                   <Radio className="mr-2 h-4 w-4" />
-                  Launch peer-beam
+                  Launch Pairflux
                 </Link>
               </Button>
             </div>
@@ -147,7 +147,7 @@ export default function LandingPage() {
       </main>
 
       <footer className="border-t border-border/50 py-10 text-center text-sm text-muted-foreground">
-        <p>peer-beam · Open-source P2P file sharing</p>
+        <p>Pairflux · Open-source P2P file sharing</p>
       </footer>
     </div>
   );

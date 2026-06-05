@@ -16,9 +16,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "peer-beam — P2P File Sharing",
+  title: "Pairflux — P2P File Sharing",
   description:
-    "Instant browser-to-browser file sharing. No accounts, no server storage.",
+    "Pairflux — instant browser-to-browser file sharing. No accounts, no server storage.",
 };
 
 export default function RootLayout({

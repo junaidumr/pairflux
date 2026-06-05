@@ -1,4 +1,4 @@
-# peer-beam
+# Pairflux
 
 Production-ready, browser-to-browser file sharing inspired by PairDrop and Snapdrop. No accounts, no database, no file storage on the server — only WebRTC data channels for transfers and Socket.io for signaling.
 
@@ -111,7 +111,7 @@ Browser A ←—— WebRTC DataChannel (files) ——→ Browser B
 ```
 app/           Next.js routes (landing + /share)
 components/    UI (shadcn) + share panels
-hooks/         usePeerBeam orchestration
+hooks/         usePairflux orchestration
 lib/           WebRTC, transfer engine, protocol
 server/        Express + Socket.io signaling
 types/         Shared TypeScript types
@@ -120,4 +120,3 @@ types/         Shared TypeScript types
 ## License
 
 MIT
-# peer-beam

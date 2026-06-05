@@ -4,5 +4,5 @@ const ENABLED =
     : typeof window !== "undefined";
 
 export function tlog(...args: unknown[]): void {
-  if (ENABLED) console.log("[peer-beam:transfer]", ...args);
+  if (ENABLED) console.log("[pairflux:transfer]", ...args);
 }

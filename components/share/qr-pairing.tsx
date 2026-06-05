@@ -25,7 +25,7 @@ export function QrPairing({ roomId, deviceId, onPair }: QrPairingProps) {
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [scanOpen, setScanOpen] = useState(false);
   const scannerRef = useRef<{ stop: () => Promise<void>; isScanning: boolean } | null>(null);
-  const scanRegionId = "peer-beam-qr-scanner";
+  const scanRegionId = "pairflux-qr-scanner";
 
   const pairingUrl =
     typeof window !== "undefined"
@@ -140,7 +140,7 @@ export function QrPairing({ roomId, deviceId, onPair }: QrPairingProps) {
           <DialogContent className="rounded-2xl sm:max-w-lg">
             <DialogHeader>
               <DialogTitle>Scan QR code</DialogTitle>
-              <DialogDescription>Point your camera at another peer-beam QR</DialogDescription>
+              <DialogDescription>Point your camera at another Pairflux QR</DialogDescription>
             </DialogHeader>
             <div
               id={scanRegionId}

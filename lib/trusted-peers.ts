@@ -2,7 +2,8 @@
 
 import type { DeviceId } from "@/types";
 
-const STORAGE_KEY = "peer-beam-trusted-peers";
+const STORAGE_KEY = "pairflux-trusted-peers";
+const LEGACY_STORAGE_KEY = "peer-beam-trusted-peers";
 
 export interface TrustedPeer {
   peerId: DeviceId;
@@ -14,7 +15,11 @@ export interface TrustedPeer {
 function readAll(): TrustedPeer[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    let raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) {
+      raw = localStorage.getItem(LEGACY_STORAGE_KEY);
+      if (raw) localStorage.setItem(STORAGE_KEY, raw);
+    }
     if (!raw) return [];
     const parsed = JSON.parse(raw) as TrustedPeer[];
     return Array.isArray(parsed) ? parsed : [];

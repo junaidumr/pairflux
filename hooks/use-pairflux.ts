@@ -27,7 +27,7 @@ import type {
   TransferItem,
 } from "@/types";
 
-export function usePeerBeam() {
+export function usePairflux() {
   const [peers, setPeers] = useState<PeerDevice[]>([]);
   const [transfers, setTransfers] = useState<TransferItem[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
