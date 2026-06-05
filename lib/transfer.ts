@@ -7,7 +7,6 @@ import {
 } from "@/lib/constants";
 import {
   createReceiveSink,
-  downloadBlob,
   type ReceiveSinkHandle,
 } from "@/lib/file-receiver";
 import { encodeChunk } from "@/lib/protocol";
@@ -18,6 +17,19 @@ type TransferUpdate = (item: TransferItem) => void;
 type SendRawFn = (peerId: DeviceId, data: ArrayBuffer) => Promise<boolean>;
 type SendControlFn = (peerId: DeviceId, msg: ControlMessage) => Promise<boolean>;
 type IsConnectedFn = (peerId: DeviceId) => boolean;
+
+export type IncomingCompletePayload = {
+  id: string;
+  peerId: DeviceId;
+  peerName: string;
+  name: string;
+  size: number;
+  mime: string;
+  blob: Blob | null;
+  startedAt: number;
+};
+
+type IncomingCompleteFn = (payload: IncomingCompletePayload) => void;
 
 interface OutgoingState {
   file: File;
@@ -69,6 +81,7 @@ export class TransferEngine {
   private outgoing = new Map<string, OutgoingState>();
   private incoming = new Map<string, IncomingState>();
   private onUpdate: TransferUpdate;
+  private onIncomingComplete: IncomingCompleteFn;
   private sendRaw: SendRawFn;
   private sendControl: SendControlFn;
   private isConnected: IsConnectedFn;
@@ -79,9 +92,11 @@ export class TransferEngine {
     sendRaw: SendRawFn,
     sendControl: SendControlFn,
     isConnected: IsConnectedFn,
-    getBufferedAmount: (peerId: DeviceId) => number
+    getBufferedAmount: (peerId: DeviceId) => number,
+    onIncomingComplete: IncomingCompleteFn
   ) {
     this.onUpdate = onUpdate;
+    this.onIncomingComplete = onIncomingComplete;
     this.sendRaw = sendRaw;
     this.sendControl = sendControl;
     this.isConnected = isConnected;
@@ -539,10 +554,29 @@ export class TransferEngine {
       }
       if (inc.sink.mode === "disk") {
         await inc.sink.sink.finalize();
+        this.onIncomingComplete({
+          id: inc.id,
+          peerId: inc.peerId,
+          peerName: inc.peerName,
+          name: inc.name,
+          size: inc.size,
+          mime: inc.mime,
+          blob: null,
+          startedAt: inc.startedAt,
+        });
       } else {
         const parts = inc.sink.sink.getParts();
         const blob = new Blob(parts, { type: inc.mime });
-        downloadBlob(blob, inc.name);
+        this.onIncomingComplete({
+          id: inc.id,
+          peerId: inc.peerId,
+          peerName: inc.peerName,
+          name: inc.name,
+          size: inc.size,
+          mime: inc.mime,
+          blob,
+          startedAt: inc.startedAt,
+        });
       }
 
       inc.status = "completed";
@@ -558,6 +592,7 @@ export class TransferEngine {
         progress: 100,
         speedBps: 0,
         etaSeconds: 0,
+        completedAt: Date.now(),
       });
       await this.sendControl(inc.peerId, { type: "transfer-complete", id: inc.id });
       tlog("transfer complete (receiver)", inc.id);
@@ -589,6 +624,7 @@ export class TransferEngine {
       speedBps: 0,
       etaSeconds: status === "completed" ? 0 : null,
       error: out.error,
+      completedAt: status === "completed" || status === "failed" ? Date.now() : undefined,
     });
     if (status === "completed" || status === "cancelled" || status === "rejected") {
       this.outgoing.delete(id);

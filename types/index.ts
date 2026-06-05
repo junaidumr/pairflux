@@ -28,6 +28,37 @@ export type TransferStatus =
   | "cancelled"
   | "failed";
 
+export type FileCategory = "image" | "video" | "document";
+
+export type HistoryStatus = "sent" | "received" | "failed";
+
+export interface TransferHistoryRecord {
+  id: string;
+  peerId: DeviceId;
+  peerName: string;
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
+  fileCategory: FileCategory;
+  direction: TransferDirection;
+  status: HistoryStatus;
+  timestamp: number;
+  startedAt?: number;
+  error?: string;
+  hasBlob: boolean;
+}
+
+export interface ReceivedFilePayload {
+  id: string;
+  peerId: DeviceId;
+  peerName: string;
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
+  fileCategory: FileCategory;
+  blob: Blob | null;
+}
+
 export interface TransferItem {
   id: string;
   peerId: DeviceId;
@@ -41,6 +72,7 @@ export interface TransferItem {
   speedBps: number;
   etaSeconds: number | null;
   error?: string;
+  completedAt?: number;
 }
 
 export type ControlMessage =

@@ -10,6 +10,14 @@ import {
   getRoomId,
   setDeviceName,
 } from "@/lib/device";
+import {
+  canImportToGallery,
+  downloadFile,
+  getFileCategory,
+  importToGallery,
+  importToGalleryHint,
+  openFile,
+} from "@/lib/file-export";
 import { generatePairingCode } from "@/lib/pairing-code";
 import { SignalingClient } from "@/lib/signaling";
 import {
@@ -17,15 +25,50 @@ import {
   getTrustedPeerIds,
   isTrustedPeer,
 } from "@/lib/trusted-peers";
-import { TransferEngine } from "@/lib/transfer";
+import { deleteBlob, getBlob, saveBlob } from "@/lib/transfer-blob-store";
+import { deleteRecord, loadHistory, upsertRecord } from "@/lib/transfer-history";
+import { TransferEngine, type IncomingCompletePayload } from "@/lib/transfer";
 import { WebRTCManager } from "@/lib/webrtc";
 import type {
   ChatMessage,
+  HistoryStatus,
   PairingPhase,
   PairingSuccessPayload,
   PeerDevice,
+  ReceivedFilePayload,
+  TransferHistoryRecord,
   TransferItem,
 } from "@/types";
+
+function toHistoryStatus(item: TransferItem): HistoryStatus | null {
+  if (item.status === "failed") return "failed";
+  if (item.status === "completed") {
+    return item.direction === "incoming" ? "received" : "sent";
+  }
+  return null;
+}
+
+function buildHistoryRecord(
+  item: TransferItem,
+  opts: { hasBlob?: boolean; startedAt?: number } = {}
+): TransferHistoryRecord {
+  const status = toHistoryStatus(item);
+  return {
+    id: item.id,
+    peerId: item.peerId,
+    peerName: item.peerName,
+    fileName: item.fileName,
+    fileSize: item.fileSize,
+    mimeType: item.mimeType,
+    fileCategory: getFileCategory(item.mimeType, item.fileName),
+    direction: item.direction,
+    status: status ?? "failed",
+    timestamp: item.completedAt ?? Date.now(),
+    startedAt: opts.startedAt,
+    error: item.error,
+    hasBlob: opts.hasBlob ?? false,
+  };
+}
 
 export function usePairflux() {
   const [peers, setPeers] = useState<PeerDevice[]>([]);
@@ -43,12 +86,15 @@ export function usePairflux() {
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [pairingError, setPairingError] = useState<string | null>(null);
   const [lastPairedPeerId, setLastPairedPeerId] = useState<string | null>(null);
+  const [history, setHistory] = useState<TransferHistoryRecord[]>([]);
+  const [receivedFile, setReceivedFile] = useState<ReceivedFilePayload | null>(null);
 
   useEffect(() => {
     setDeviceId(getOrCreateDeviceId());
     setNameState(getOrCreateDeviceName());
     setRoomId(getRoomId());
     setPairedPeerIds(new Set(getTrustedPeerIds()));
+    setHistory(loadHistory());
     setInitialized(true);
   }, []);
 
@@ -57,6 +103,7 @@ export function usePairflux() {
   const transferRef = useRef<TransferEngine | null>(null);
   const peerNamesRef = useRef<Map<string, string>>(new Map());
   const pairedRef = useRef<Set<string>>(new Set());
+  const persistedHistoryRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     pairedRef.current = pairedPeerIds;
@@ -71,17 +118,76 @@ export function usePairflux() {
     });
   }, []);
 
-  const updateTransfer = useCallback((item: TransferItem) => {
-    setTransfers((prev) => {
-      const idx = prev.findIndex((t) => t.id === item.id);
-      if (idx >= 0) {
-        const next = [...prev];
-        next[idx] = { ...next[idx], ...item };
-        return next;
-      }
-      return [item, ...prev];
-    });
+  const persistTerminalTransfer = useCallback((item: TransferItem, startedAt?: number) => {
+    const historyStatus = toHistoryStatus(item);
+    if (!historyStatus) return;
+    const key = `${item.id}:${historyStatus}`;
+    if (persistedHistoryRef.current.has(key)) return;
+    persistedHistoryRef.current.add(key);
+    const record = buildHistoryRecord(item, { hasBlob: false, startedAt });
+    setHistory(upsertRecord(record));
   }, []);
+
+  const handleIncomingComplete = useCallback((payload: IncomingCompletePayload) => {
+    const fileCategory = getFileCategory(payload.mime, payload.name);
+    const hasBlob = !!payload.blob;
+    const key = `${payload.id}:received`;
+    persistedHistoryRef.current.add(key);
+
+    void (async () => {
+      if (payload.blob) {
+        await saveBlob(payload.id, payload.blob);
+      }
+      const record: TransferHistoryRecord = {
+        id: payload.id,
+        peerId: payload.peerId,
+        peerName: payload.peerName,
+        fileName: payload.name,
+        fileSize: payload.size,
+        mimeType: payload.mime,
+        fileCategory,
+        direction: "incoming",
+        status: "received",
+        timestamp: Date.now(),
+        startedAt: payload.startedAt,
+        hasBlob,
+      };
+      setHistory(upsertRecord(record));
+      setReceivedFile({
+        id: payload.id,
+        peerId: payload.peerId,
+        peerName: payload.peerName,
+        fileName: payload.name,
+        fileSize: payload.size,
+        mimeType: payload.mime,
+        fileCategory,
+        blob: payload.blob,
+      });
+      toast.success(`Received ${payload.name}`);
+    })();
+  }, []);
+
+  const updateTransfer = useCallback(
+    (item: TransferItem) => {
+      setTransfers((prev) => {
+        const idx = prev.findIndex((t) => t.id === item.id);
+        if (idx >= 0) {
+          const next = [...prev];
+          next[idx] = { ...next[idx], ...item };
+          return next;
+        }
+        return [item, ...prev];
+      });
+
+      if (item.status === "completed" && item.direction === "outgoing") {
+        persistTerminalTransfer(item);
+      }
+      if (item.status === "failed") {
+        persistTerminalTransfer(item);
+      }
+    },
+    [persistTerminalTransfer]
+  );
 
   const appendMessage = useCallback((msg: ChatMessage) => {
     setMessages((prev) => {
@@ -192,7 +298,8 @@ export function usePairflux() {
       (peerId, data) => webrtc.sendRaw(peerId, data),
       (peerId, msg) => webrtc.sendControl(peerId, msg),
       (peerId) => webrtc.isConnected(peerId),
-      (peerId) => webrtc.getBufferedAmount(peerId)
+      (peerId) => webrtc.getBufferedAmount(peerId),
+      handleIncomingComplete
     );
 
     const avatar = getAvatarColor(deviceId);
@@ -266,6 +373,7 @@ export function usePairflux() {
     appendMessage,
     connectIfPaired,
     handlePairingSuccess,
+    handleIncomingComplete,
   ]);
 
   const startPairingHost = useCallback(() => {
@@ -449,9 +557,101 @@ export function usePairflux() {
     );
   }, [peers, pairedPeerIds, connectedPeers]);
 
+  const dismissReceivedFile = useCallback(() => {
+    setReceivedFile(null);
+  }, []);
+
+  const resolveBlob = useCallback(
+    async (id: string, inMemory: Blob | null): Promise<Blob | null> => {
+      if (inMemory) return inMemory;
+      return getBlob(id);
+    },
+    []
+  );
+
+  const openReceivedFile = useCallback(async () => {
+    if (!receivedFile) return;
+    const blob = await resolveBlob(receivedFile.id, receivedFile.blob);
+    if (!blob) {
+      toast.error("File no longer available on this device");
+      return;
+    }
+    openFile(blob, receivedFile.fileName, receivedFile.mimeType);
+  }, [receivedFile, resolveBlob]);
+
+  const downloadReceivedFile = useCallback(async () => {
+    if (!receivedFile) return;
+    const blob = await resolveBlob(receivedFile.id, receivedFile.blob);
+    if (!blob) {
+      toast.error("File no longer available on this device");
+      return;
+    }
+    downloadFile(blob, receivedFile.fileName, receivedFile.mimeType);
+    toast.success("Download started");
+  }, [receivedFile, resolveBlob]);
+
+  const importReceivedFile = useCallback(async () => {
+    if (!receivedFile) return;
+    const blob = await resolveBlob(receivedFile.id, receivedFile.blob);
+    if (!blob) {
+      toast.error("File no longer available on this device");
+      return;
+    }
+    const result = await importToGallery(blob, receivedFile.fileName, receivedFile.mimeType);
+    if (result === "shared") {
+      toast.success("Choose Save to Photos in the share sheet");
+    } else if (result === "downloaded") {
+      toast.info(importToGalleryHint(), { duration: 6000 });
+    }
+  }, [receivedFile, resolveBlob]);
+
+  const openFromHistory = useCallback(
+    async (record: TransferHistoryRecord) => {
+      const blob = await getBlob(record.id);
+      if (!blob) {
+        toast.error("File no longer available on this device");
+        return;
+      }
+      openFile(blob, record.fileName, record.mimeType);
+    },
+    []
+  );
+
+  const downloadFromHistory = useCallback(async (record: TransferHistoryRecord) => {
+    const blob = await getBlob(record.id);
+    if (!blob) {
+      toast.error("File no longer available on this device");
+      return;
+    }
+    downloadFile(blob, record.fileName, record.mimeType);
+    toast.success("Download started");
+  }, []);
+
+  const importFromHistory = useCallback(async (record: TransferHistoryRecord) => {
+    const blob = await getBlob(record.id);
+    if (!blob) {
+      toast.error("File no longer available on this device");
+      return;
+    }
+    const result = await importToGallery(blob, record.fileName, record.mimeType);
+    if (result === "shared") {
+      toast.success("Choose Save to Photos in the share sheet");
+    } else if (result === "downloaded") {
+      toast.info(importToGalleryHint(), { duration: 6000 });
+    }
+  }, []);
+
+  const deleteHistoryRecord = useCallback((id: string) => {
+    void deleteBlob(id);
+    setHistory(deleteRecord(id));
+    toast.success("Removed from history");
+  }, []);
+
   return {
     peers,
     transfers,
+    history,
+    receivedFile,
     messages,
     connectedPeers,
     pairedPeerIds,
@@ -480,5 +680,14 @@ export function usePairflux() {
     cancelTransfer: (id: string) => transferRef.current?.cancelTransfer(id),
     retryTransfer: (id: string) => transferRef.current?.retryOutgoing(id),
     isPeerConnected: (id: string) => connectedPeers.has(id),
+    dismissReceivedFile,
+    openReceivedFile,
+    downloadReceivedFile,
+    importReceivedFile,
+    openFromHistory,
+    downloadFromHistory,
+    importFromHistory,
+    deleteHistoryRecord,
+    canImportToGallery,
   };
 }

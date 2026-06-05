@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, Share2, Users } from "lucide-react";
+import { History, Share2, Users } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppHeader } from "@/components/share/app-header";
@@ -10,6 +10,7 @@ import { DropZone } from "@/components/share/drop-zone";
 import { RecipientBar } from "@/components/share/recipient-bar";
 import { ChatPanel } from "@/components/share/chat-panel";
 import { PairingPanel } from "@/components/share/pairing-panel";
+import { FileReceivedDialog } from "@/components/share/file-received-dialog";
 import { TransferDialog } from "@/components/share/transfer-dialog";
 import { TransferPanel } from "@/components/share/transfer-panel";
 import { LoadingScreen } from "@/components/layout/loading-screen";
@@ -42,12 +43,16 @@ function ShareWorkspace({
   onVerifyPairingCode,
   onDismissPairingSuccess,
   transfers,
+  history,
   onFiles,
   messages,
   onSendText,
   onSendLink,
   onCancel,
   onRetry,
+  onDownloadHistory,
+  onImportHistory,
+  onDeleteHistory,
   onClearSelection,
 }: {
   peers: Parameters<typeof DeviceList>[0]["peers"];
@@ -70,12 +75,16 @@ function ShareWorkspace({
   onVerifyPairingCode: (code: string) => void;
   onDismissPairingSuccess: () => void;
   transfers: Parameters<typeof TransferPanel>[0]["transfers"];
+  history: Parameters<typeof TransferPanel>[0]["history"];
   onFiles: (files: FileList | File[]) => void;
   messages: Parameters<typeof ChatPanel>[0]["messages"];
   onSendText: (t: string) => void | Promise<void>;
   onSendLink: (u: string) => void | Promise<void>;
   onCancel: (id: string) => void;
   onRetry: (id: string) => void;
+  onDownloadHistory: Parameters<typeof TransferPanel>[0]["onDownloadHistory"];
+  onImportHistory: Parameters<typeof TransferPanel>[0]["onImportHistory"];
+  onDeleteHistory: (id: string) => void;
   onClearSelection: () => void;
 }) {
   const shareDisabled = !ready || otherPeerCount === 0 || !hasPairedConnection;
@@ -124,8 +133,12 @@ function ShareWorkspace({
 
       <TransferPanel
         transfers={transfers}
+        history={history}
         onCancel={onCancel}
         onRetry={onRetry}
+        onDownloadHistory={onDownloadHistory}
+        onImportHistory={onImportHistory}
+        onDeleteHistory={onDeleteHistory}
         className="hidden lg:flex"
       />
     </AppShell>
@@ -140,6 +153,8 @@ export function ShareClient() {
   const {
     peers,
     transfers,
+    history,
+    receivedFile,
     connectedPeers,
     pairedPeerIds,
     pairingPhase,
@@ -166,6 +181,13 @@ export function ShareClient() {
     rejectTransfer,
     cancelTransfer,
     retryTransfer,
+    dismissReceivedFile,
+    openReceivedFile,
+    downloadReceivedFile,
+    importReceivedFile,
+    downloadFromHistory,
+    importFromHistory,
+    deleteHistoryRecord,
   } = usePairflux();
 
   const [selectedPeerId, setSelectedPeerId] = useState<string | null>(null);
@@ -240,12 +262,16 @@ export function ShareClient() {
     onVerifyPairingCode: verifyPairingCode,
     onDismissPairingSuccess: resetPairingUi,
     transfers,
+    history,
     messages: visibleMessages,
     onFiles: handleFiles,
     onSendText: (t: string) => sendText(t, selectedPeerId ?? undefined),
     onSendLink: (u: string) => sendLink(u, selectedPeerId ?? undefined),
     onCancel: cancelTransfer,
     onRetry: retryTransfer,
+    onDownloadHistory: downloadFromHistory,
+    onImportHistory: importFromHistory,
+    onDeleteHistory: deleteHistoryRecord,
     onClearSelection: () => setSelectedPeerId(null),
   };
 
@@ -327,8 +353,12 @@ export function ShareClient() {
               <AppShell className="min-h-[calc(100vh-11rem)] flex-col">
                 <TransferPanel
                   transfers={transfers}
+                  history={history}
                   onCancel={cancelTransfer}
                   onRetry={retryTransfer}
+                  onDownloadHistory={downloadFromHistory}
+                  onImportHistory={importFromHistory}
+                  onDeleteHistory={deleteHistoryRecord}
                   className="flex flex-1 border-l-0"
                 />
               </AppShell>
@@ -346,8 +376,8 @@ export function ShareClient() {
                 Beam
               </TabsTrigger>
               <TabsTrigger value="transfers" className="relative gap-1 rounded-xl text-[11px]">
-                <Activity className="h-4 w-4" />
-                Activity
+                <History className="h-4 w-4" />
+                History
                 {transfers.some(
                   (t) => t.status === "transferring" || t.status === "awaiting-accept"
                 ) && (
@@ -363,6 +393,14 @@ export function ShareClient() {
         transfer={pendingIncoming}
         onAccept={acceptTransfer}
         onReject={rejectTransfer}
+      />
+
+      <FileReceivedDialog
+        file={receivedFile}
+        onDismiss={dismissReceivedFile}
+        onOpen={openReceivedFile}
+        onDownload={downloadReceivedFile}
+        onImport={importReceivedFile}
       />
     </div>
   );
