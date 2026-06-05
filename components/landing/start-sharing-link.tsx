@@ -24,7 +24,6 @@ export function StartSharingLink({
       size="lg"
       className={className}
       onClick={() => {
-        window.scrollTo(0, 0);
         router.push(href);
       }}
     >

@@ -8,12 +8,11 @@ import {
   Users,
   Zap,
 } from "lucide-react";
-import Link from "next/link";
+import { ShareAppLink } from "@/components/landing/share-app-link";
 import { StartSharingLink } from "@/components/landing/start-sharing-link";
 import { PairfluxLogo } from "@/components/brand/pairflux-logo";
 import { MeshBackground } from "@/components/layout/mesh-background";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
-import { Button } from "@/components/ui/button";
 
 const features = [
   {
@@ -54,12 +53,10 @@ export default function LandingPage() {
           <PairfluxLogo size="md" />
           <nav className="flex items-center gap-2">
             <ThemeToggle />
-            <Button asChild className="rounded-xl px-5 shadow-lg shadow-primary/20">
-              <Link href="/share">
-                Open app
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </Link>
-            </Button>
+            <ShareAppLink className="rounded-xl px-5 shadow-lg shadow-primary/20">
+              Open app
+              <ArrowRight className="ml-2 h-4 w-4" />
+            </ShareAppLink>
           </nav>
         </div>
       </header>
@@ -81,9 +78,14 @@ export default function LandingPage() {
             </p>
             <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
               <StartSharingLink className="h-12 rounded-xl px-8 text-base glow-primary" />
-              <Button asChild variant="outline" size="lg" className="h-12 rounded-xl px-8">
-                <Link href="/share?room=demo">Try demo room</Link>
-              </Button>
+              <ShareAppLink
+                variant="outline"
+                size="lg"
+                className="h-12 rounded-xl px-8"
+                href="/share?room=demo"
+              >
+                Try demo room
+              </ShareAppLink>
             </div>
           </div>
 
@@ -135,12 +137,10 @@ export default function LandingPage() {
                   per-chunk acknowledgements, backpressure, and optional TURN for tough networks.
                 </p>
               </div>
-              <Button asChild size="lg" className="shrink-0 rounded-xl">
-                <Link href="/share">
-                  <Radio className="mr-2 h-4 w-4" />
-                  Launch Pairflux
-                </Link>
-              </Button>
+              <ShareAppLink size="lg" className="shrink-0 rounded-xl">
+                <Radio className="mr-2 h-4 w-4" />
+                Launch Pairflux
+              </ShareAppLink>
             </div>
           </div>
         </section>

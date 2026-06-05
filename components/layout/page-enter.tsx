@@ -1,7 +1,6 @@
 "use client";
 
 import { motion, useReducedMotion } from "framer-motion";
-import { useEffect } from "react";
 import { cn } from "@/lib/utils";
 
 const EASE_OUT = [0.16, 1, 0.3, 1] as const;
@@ -19,10 +18,6 @@ interface PageEnterProps {
  */
 export function PageEnter({ children, className, fromTop = true }: PageEnterProps) {
   const reduced = useReducedMotion();
-
-  useEffect(() => {
-    window.scrollTo(0, 0);
-  }, []);
 
   if (reduced) {
     return <div className={cn("w-full bg-background", className)}>{children}</div>;

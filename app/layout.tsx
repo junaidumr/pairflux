@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { ScrollToTop } from "@/components/layout/scroll-to-top";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -16,9 +17,17 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Pairflux — P2P File Sharing",
+  title: {
+    default: "Pairflux",
+    template: "%s · Pairflux",
+  },
   description:
-    "Pairflux — instant browser-to-browser file sharing. No accounts, no server storage.",
+    "Instant browser-to-browser file sharing. No accounts, no server storage.",
+  applicationName: "Pairflux",
+  icons: {
+    icon: [{ url: "/icon.svg", type: "image/svg+xml" }],
+    apple: [{ url: "/apple-icon.svg", type: "image/svg+xml" }],
+  },
 };
 
 export default function RootLayout({
@@ -33,6 +42,7 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} font-sans antialiased`}
       >
         <ThemeProvider>
+          <ScrollToTop />
           <TooltipProvider>
             {children}
             <Toaster richColors position="top-center" className="sm:top-right" />
