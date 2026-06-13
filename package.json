@@ -4,8 +4,8 @@
   "private": true,
   "scripts": {
     "clean": "rm -rf .next node_modules/.cache",
-    "dev": "concurrently -n web,signal -c blue,magenta \"npm run dev:web\" \"npm run dev:signal\"",
-    "dev:web": "next dev",
+    "dev": "node scripts/check-dev-ports.mjs && concurrently -n web,signal -c blue,magenta \"npm run dev:web\" \"npm run dev:signal\"",
+    "dev:web": "next dev -p 3000",
     "dev:signal": "tsx watch server/index.ts",
     "build": "next build",
     "start": "concurrently -n web,signal \"next start\" \"tsx server/index.ts\"",

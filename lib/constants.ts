@@ -10,6 +10,9 @@ export const MAX_CHUNK_RETRIES = 8;
 export const RECONNECT_DELAY_MS = 2000;
 export const INACTIVE_TIMEOUT_MS = 5 * 60 * 1000;
 export const SIGNALING_PATH = "/socket.io";
+/** Signaling server port in local dev (avoid 3001 — Next.js uses that as fallback). */
+export const DEV_SIGNALING_PORT =
+  process.env.NEXT_PUBLIC_SIGNALING_PORT ?? "3002";
 
 export const AVATAR_COLORS = [
   "bg-violet-500",
@@ -64,6 +67,13 @@ export function getStunServers(): RTCIceServer[] {
   return servers;
 }
 
+import {
+  isDevNetworkHost,
+  isLocalDevHost,
+} from "@/lib/network-hosts";
+
+export { isLocalDevHost } from "@/lib/network-hosts";
+
 /** Resolved at build time in the browser bundle (NEXT_PUBLIC_*). */
 function signalingUrlFromEnv(): string | undefined {
   const raw =
@@ -73,13 +83,32 @@ function signalingUrlFromEnv(): string | undefined {
   return raw.replace(/\/$/, "");
 }
 
-export function isLocalDevHost(hostname: string): boolean {
-  return (
-    hostname === "localhost" ||
-    hostname === "127.0.0.1" ||
-    hostname === "[::1]" ||
-    hostname.endsWith(".local")
-  );
+/**
+ * When env points at localhost but the page is opened via LAN IP (e.g. phone
+ * at 192.168.x.x:3000), rewrite the signaling host to match the page host.
+ * Also migrates legacy dev configs that used port 3001 (conflicts with Next.js).
+ */
+function normalizeDevSignalingUrl(
+  envUrl: string,
+  pageHostname: string,
+  pageProtocol: string
+): string {
+  try {
+    const parsed = new URL(envUrl);
+    if (isLocalDevHost(parsed.hostname) && (!parsed.port || parsed.port === "3001")) {
+      parsed.port = DEV_SIGNALING_PORT;
+    }
+    if (
+      isLocalDevHost(parsed.hostname) &&
+      isDevNetworkHost(pageHostname) &&
+      parsed.hostname !== pageHostname
+    ) {
+      return `${pageProtocol}//${pageHostname}:${parsed.port || DEV_SIGNALING_PORT}`;
+    }
+    return parsed.origin;
+  } catch {
+    return envUrl;
+  }
 }
 
 /**
@@ -88,22 +117,25 @@ export function isLocalDevHost(hostname: string): boolean {
  */
 export function getSignalingUrl(): string {
   const fromEnv = signalingUrlFromEnv();
-  if (fromEnv) return fromEnv;
 
   if (typeof window !== "undefined") {
     const { hostname, protocol, origin } = window.location;
-    if (isLocalDevHost(hostname)) {
-      return `${protocol}//${hostname}:3001`;
+
+    if (fromEnv) {
+      return normalizeDevSignalingUrl(fromEnv, hostname, protocol);
     }
-    // Same-host reverse proxy (nginx /socket.io → signaling). Not available on Vercel alone.
+    if (isDevNetworkHost(hostname)) {
+      return `${protocol}//${hostname}:${DEV_SIGNALING_PORT}`;
+    }
     return origin;
   }
 
-  return "http://localhost:3001";
+  if (fromEnv) return fromEnv;
+  return `http://localhost:${DEV_SIGNALING_PORT}`;
 }
 
 export function isSignalingUrlConfigured(): boolean {
   if (signalingUrlFromEnv()) return true;
   if (typeof window === "undefined") return false;
-  return isLocalDevHost(window.location.hostname);
+  return isDevNetworkHost(window.location.hostname);
 }

@@ -343,7 +343,9 @@ export function usePairflux() {
         toast.error(message);
       }),
       signaling.on("disconnect", () => setReady(false)),
-      signaling.on("connect", () => setReady(true)),
+      signaling.on("connect", () => {
+        /* Live only after "joined" — socket may connect before room registration */
+      }),
       signaling.on("connect-error", ({ message }) => {
         toast.error(`Cannot reach signaling server: ${message}`, { id: "signaling-error" });
       }),

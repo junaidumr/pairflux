@@ -3,9 +3,10 @@ import express from "express";
 import rateLimit from "express-rate-limit";
 import { createServer } from "http";
 import { Server, Socket } from "socket.io";
+import { isAllowedDevOrigin } from "../lib/network-hosts";
 import { PairingStore } from "./pairing-store";
 
-const PORT = Number(process.env.PORT ?? 3001);
+const PORT = Number(process.env.PORT ?? 3002);
 const HOST = process.env.HOST ?? "0.0.0.0";
 
 function parseCorsOrigins(): string[] {
@@ -20,6 +21,24 @@ function parseCorsOrigins(): string[] {
 }
 
 const CORS_ORIGINS = parseCorsOrigins();
+const IS_DEV = process.env.NODE_ENV !== "production";
+
+function isAllowedOrigin(origin: string | undefined): boolean {
+  if (!origin) return true;
+  if (CORS_ORIGINS.includes(origin)) return true;
+  return IS_DEV && isAllowedDevOrigin(origin);
+}
+
+function corsOrigin(
+  origin: string | undefined,
+  callback: (err: Error | null, allow?: boolean | string) => void
+): void {
+  if (!origin || isAllowedOrigin(origin)) {
+    callback(null, origin ?? true);
+    return;
+  }
+  callback(null, false);
+}
 
 interface PeerMeta {
   id: string;
@@ -32,7 +51,7 @@ interface PeerMeta {
 const app = express();
 app.use(
   cors({
-    origin: CORS_ORIGINS,
+    origin: corsOrigin,
     credentials: true,
   })
 );
@@ -45,7 +64,7 @@ app.get("/health", (_req, res) => {
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: CORS_ORIGINS,
+    origin: corsOrigin,
     methods: ["GET", "POST"],
     credentials: true,
   },
@@ -128,6 +147,16 @@ io.on("connection", (socket: Socket) => {
 
     peerId = id;
     room = r;
+
+    // Replace stale socket when the same device reconnects (refresh, tab restore).
+    for (const [sid, p] of peers) {
+      if (p.id === id && p.room === r && sid !== socket.id) {
+        const stale = io.sockets.sockets.get(sid);
+        if (stale) stale.disconnect(true);
+        peers.delete(sid);
+      }
+    }
+
     peers.set(socket.id, {
       id,
       name: sanitizeName(payload?.name),

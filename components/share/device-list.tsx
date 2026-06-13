@@ -82,7 +82,8 @@ export function DeviceList({
             </div>
             <p className="text-sm font-medium">Waiting for peers</p>
             <p className="text-xs leading-relaxed text-muted-foreground">
-              Open this room on another browser to start sharing.
+              Open this room on another device or browser profile. Two tabs in the
+              same browser won&apos;t appear here — use the pairing code instead.
             </p>
           </div>
         ) : (
